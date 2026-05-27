@@ -117,7 +117,7 @@ local function _result_for_error(mutation, message, duration)
 end
 
 local function _prepare_one(base_ir, mutation, options)
-  local mutation_dir = common.join_path(options.work_dir, mutation.id)
+  local mutation_dir = common.join_path(options.work_dir, "mutations/" .. mutation.id)
   local ir_path = common.join_path(mutation_dir, "feature.json")
   local mutated_ir = engine.apply_mutation(base_ir, mutation)
 
@@ -286,13 +286,16 @@ local function _run_runner_worker(base_ir, mutations, options, timed_out)
         results[#results + 1] = _result_for_error(mutation, prep_err, 0)
       else
         mutation_by_id[mutation.id] = mutation
-        jobs[#jobs + 1] = json.encode_compact({
+        jobs[#jobs + 1] = {
           id = mutation.id,
-          feature_json = feature_json,
-          generated_dir = options.generated_dir,
-          work_dir = common.join_path(options.work_dir, mutation.id),
-          timeout = tostring(options.timeout_seconds or ""),
-        }):gsub("\n$", "")
+          line = json.encode_compact({
+            id = mutation.id,
+            feature_json = feature_json,
+            generated_dir = options.generated_dir,
+            work_dir = common.join_path(options.work_dir, "mutations/" .. mutation.id),
+            timeout = tostring(options.timeout_seconds or ""),
+          }):gsub("\n$", ""),
+        }
       end
     end
   end
@@ -301,32 +304,51 @@ local function _run_runner_worker(base_ir, mutations, options, timed_out)
     return results
   end
 
-  local input_path = common.join_path(options.work_dir, "runner-worker-input.jsonl")
-  local ok, err = common.write_file(input_path, table.concat(jobs, "\n") .. "\n")
-  if not ok then
-    for _, mutation in pairs(mutation_by_id) do
-      results[#results + 1] = _result_for_error(mutation, err, 0)
-    end
-    return results
+  local worker_count = math.max(1, tonumber(options.workers or 1) or 1)
+  local buckets = {}
+  for index = 1, worker_count do
+    buckets[index] = {}
   end
-
-  local run = common.run_command(options.runner_worker, {
-    cwd = common.current_dir(),
-    stdin_path = input_path,
-  })
-  if not run.ok then
-    for _, mutation in pairs(mutation_by_id) do
-      results[#results + 1] = _result_for_error(mutation, run.output, 0)
-    end
-    return results
+  for index, job in ipairs(jobs) do
+    local bucket = buckets[((index - 1) % worker_count) + 1]
+    bucket[#bucket + 1] = job
   end
 
   local seen = {}
-  for line in (run.output or ""):gmatch("([^\n]+)") do
-    local decoded_ok, response = pcall(json.decode, line)
-    if decoded_ok and response.id ~= nil and mutation_by_id[response.id] ~= nil then
-      seen[response.id] = true
-      results[#results + 1] = _job_response_to_result(mutation_by_id[response.id], response)
+  for index, bucket in ipairs(buckets) do
+    local input_name = worker_count == 1
+      and "runner-worker-input.jsonl"
+      or ("runner-worker-input-" .. tostring(index) .. ".jsonl")
+    local input_path = common.join_path(options.work_dir, input_name)
+    local lines = {}
+    for _, job in ipairs(bucket) do
+      lines[#lines + 1] = job.line
+    end
+    local ok, err = common.write_file(input_path, table.concat(lines, "\n") .. (#lines > 0 and "\n" or ""))
+    if not ok then
+      for _, job in ipairs(bucket) do
+        results[#results + 1] = _result_for_error(mutation_by_id[job.id], err, 0)
+        seen[job.id] = true
+      end
+    elseif #bucket > 0 then
+      local run = common.run_command(options.runner_worker, {
+        cwd = common.current_dir(),
+        stdin_path = input_path,
+      })
+      if not run.ok then
+        for _, job in ipairs(bucket) do
+          results[#results + 1] = _result_for_error(mutation_by_id[job.id], run.output, 0)
+          seen[job.id] = true
+        end
+      else
+        for line in (run.output or ""):gmatch("([^\n]+)") do
+          local decoded_ok, response = pcall(json.decode, line)
+          if decoded_ok and response.id ~= nil and mutation_by_id[response.id] ~= nil then
+            seen[response.id] = true
+            results[#results + 1] = _job_response_to_result(mutation_by_id[response.id], response)
+          end
+        end
+      end
     end
   end
 
