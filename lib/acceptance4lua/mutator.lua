@@ -272,6 +272,134 @@ local function _job_response_to_result(mutation, response)
   return _result_for_error(mutation, response and response.error or "runner worker protocol error", response and response.duration or 0)
 end
 
+local function _sort_results_by_mutation_id(results)
+  table.sort(results, function(left, right)
+    local left_index = tonumber(tostring(left.mutation.id):match("%d+")) or 0
+    local right_index = tonumber(tostring(right.mutation.id):match("%d+")) or 0
+    return left_index < right_index
+  end)
+end
+
+local function _append_worker_output_results(output, mutation_by_id, seen, results)
+  for line in (output or ""):gmatch("([^\n]+)") do
+    local decoded_ok, response = pcall(json.decode, line)
+    if decoded_ok and response.id ~= nil and mutation_by_id[response.id] ~= nil then
+      seen[response.id] = true
+      results[#results + 1] = _job_response_to_result(mutation_by_id[response.id], response)
+    end
+  end
+end
+
+local function _append_missing_worker_results(mutation_by_id, seen, results)
+  for id, mutation in pairs(mutation_by_id) do
+    if not seen[id] then
+      results[#results + 1] = _result_for_error(mutation, "runner worker did not return a response for " .. id, 0)
+    end
+  end
+end
+
+local function _write_worker_input(path, jobs, results, mutation_by_id)
+  local lines = {}
+  for index, job in ipairs(jobs) do
+    lines[index] = job.line
+  end
+  local ok, err = common.write_file(path, table.concat(lines, "\n") .. "\n")
+  if ok then
+    return true
+  end
+  for _, mutation in pairs(mutation_by_id) do
+    results[#results + 1] = _result_for_error(mutation, err, 0)
+  end
+  return nil
+end
+
+local function _run_single_runner_worker(input_path, jobs, mutation_by_id, options, results)
+  if not _write_worker_input(input_path, jobs, results, mutation_by_id) then
+    return
+  end
+
+  local run = common.run_command(options.runner_worker, {
+    cwd = common.current_dir(),
+    stdin_path = input_path,
+  })
+  if not run.ok then
+    for _, mutation in pairs(mutation_by_id) do
+      results[#results + 1] = _result_for_error(mutation, run.output, 0)
+    end
+    return
+  end
+
+  local seen = {}
+  _append_worker_output_results(run.output, mutation_by_id, seen, results)
+  _append_missing_worker_results(mutation_by_id, seen, results)
+end
+
+local function _run_parallel_runner_workers(jobs, mutation_by_id, options, results)
+  local worker_count = math.min(options.workers, #jobs)
+  local chunks = {}
+  local lane_mutation_ids = {}
+  for index = 1, worker_count do
+    chunks[index] = {}
+    lane_mutation_ids[index] = {}
+  end
+  for index, job in ipairs(jobs) do
+    local worker_index = ((index - 1) % worker_count) + 1
+    chunks[worker_index][#chunks[worker_index] + 1] = job
+    lane_mutation_ids[worker_index][#lane_mutation_ids[worker_index] + 1] = job.id
+  end
+
+  local lanes = {}
+  for worker_index, chunk in ipairs(chunks) do
+    local input_path = common.join_path(options.work_dir, "runner-worker-input-" .. tostring(worker_index) .. ".jsonl")
+    local chunk_lines = {}
+    for index, job in ipairs(chunk) do
+      chunk_lines[index] = job.line
+    end
+    local ok, err = common.write_file(input_path, table.concat(chunk_lines, "\n") .. "\n")
+    if not ok then
+      for _, id in ipairs(lane_mutation_ids[worker_index]) do
+        results[#results + 1] = _result_for_error(mutation_by_id[id], err, 0)
+      end
+    else
+      lanes[#lanes + 1] = {
+        label = "acceptance_worker_" .. tostring(worker_index),
+        cmd = options.runner_worker .. " < " .. common.shell_quote(input_path),
+        worker_index = worker_index,
+      }
+    end
+  end
+
+  if #lanes == 0 then
+    return
+  end
+
+  local ok, worker_error, lane_results = pcall(parallel_lanes.run, lanes, {
+    stream = false,
+    timeout = options.timeout_seconds or 600,
+  })
+  if not ok then
+    for _, job in ipairs(jobs) do
+      results[#results + 1] = _result_for_error(mutation_by_id[job.id], worker_error, 0)
+    end
+    return
+  end
+
+  local seen = {}
+  for lane_index, lane in ipairs(lanes) do
+    local lane_result = lane_results[lane_index]
+    if lane_result == nil or not lane_result.ok then
+      local output = lane_result and lane_result.output or "runner worker failed"
+      for _, id in ipairs(lane_mutation_ids[lane.worker_index]) do
+        results[#results + 1] = _result_for_error(mutation_by_id[id], output, 0)
+        seen[id] = true
+      end
+    else
+      _append_worker_output_results(lane_result.output, mutation_by_id, seen, results)
+    end
+  end
+  _append_missing_worker_results(mutation_by_id, seen, results)
+end
+
 local function _run_runner_worker(base_ir, mutations, options, timed_out)
   local jobs = {}
   local mutation_by_id = {}
@@ -292,7 +420,7 @@ local function _run_runner_worker(base_ir, mutations, options, timed_out)
             id = mutation.id,
             feature_json = feature_json,
             generated_dir = options.generated_dir,
-            work_dir = common.join_path(options.work_dir, "mutations/" .. mutation.id),
+            work_dir = common.parent_dir(feature_json),
             timeout = tostring(options.timeout_seconds or ""),
           }):gsub("\n$", ""),
         }
@@ -304,65 +432,13 @@ local function _run_runner_worker(base_ir, mutations, options, timed_out)
     return results
   end
 
-  local worker_count = math.max(1, tonumber(options.workers or 1) or 1)
-  local buckets = {}
-  for index = 1, worker_count do
-    buckets[index] = {}
-  end
-  for index, job in ipairs(jobs) do
-    local bucket = buckets[((index - 1) % worker_count) + 1]
-    bucket[#bucket + 1] = job
+  if options.workers <= 1 then
+    _run_single_runner_worker(common.join_path(options.work_dir, "runner-worker-input.jsonl"), jobs, mutation_by_id, options, results)
+  else
+    _run_parallel_runner_workers(jobs, mutation_by_id, options, results)
   end
 
-  local seen = {}
-  for index, bucket in ipairs(buckets) do
-    local input_name = worker_count == 1
-      and "runner-worker-input.jsonl"
-      or ("runner-worker-input-" .. tostring(index) .. ".jsonl")
-    local input_path = common.join_path(options.work_dir, input_name)
-    local lines = {}
-    for _, job in ipairs(bucket) do
-      lines[#lines + 1] = job.line
-    end
-    local ok, err = common.write_file(input_path, table.concat(lines, "\n") .. (#lines > 0 and "\n" or ""))
-    if not ok then
-      for _, job in ipairs(bucket) do
-        results[#results + 1] = _result_for_error(mutation_by_id[job.id], err, 0)
-        seen[job.id] = true
-      end
-    elseif #bucket > 0 then
-      local run = common.run_command(options.runner_worker, {
-        cwd = common.current_dir(),
-        stdin_path = input_path,
-      })
-      if not run.ok then
-        for _, job in ipairs(bucket) do
-          results[#results + 1] = _result_for_error(mutation_by_id[job.id], run.output, 0)
-          seen[job.id] = true
-        end
-      else
-        for line in (run.output or ""):gmatch("([^\n]+)") do
-          local decoded_ok, response = pcall(json.decode, line)
-          if decoded_ok and response.id ~= nil and mutation_by_id[response.id] ~= nil then
-            seen[response.id] = true
-            results[#results + 1] = _job_response_to_result(mutation_by_id[response.id], response)
-          end
-        end
-      end
-    end
-  end
-
-  for id, mutation in pairs(mutation_by_id) do
-    if not seen[id] then
-      results[#results + 1] = _result_for_error(mutation, "runner worker did not return a response for " .. id, 0)
-    end
-  end
-
-  table.sort(results, function(left, right)
-    local left_index = tonumber(tostring(left.mutation.id):match("%d+")) or 0
-    local right_index = tonumber(tostring(right.mutation.id):match("%d+")) or 0
-    return left_index < right_index
-  end)
+  _sort_results_by_mutation_id(results)
   return results
 end
 

@@ -49,7 +49,8 @@ local function _read_status(path)
   if content == nil then
     return nil
   end
-  return math.floor(tonumber(tostring(content):gsub("%s+", "")) or 0)
+  local normalized = tostring(content):gsub("%s+", "")
+  return math.floor(tonumber(normalized) or 0)
 end
 
 local function _cleanup_lane(paths)
