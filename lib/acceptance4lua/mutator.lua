@@ -596,7 +596,11 @@ function mutator.run(options)
     results = results,
   }
 
-  if report.summary.survived == 0 and report.summary.errors == 0 then
+  local executed_any_scenario = skipped_scenarios < #base_ir.scenarios
+  if executed_any_scenario
+    and report.summary.survived == 0
+    and report.summary.errors == 0
+  then
     local new_manifest = {
       version = scenario_manifest.VERSION,
       tested_at = scenario_manifest.utc_now(),

@@ -3,6 +3,7 @@ local generator = require("acceptance4lua.generator")
 local normalizer = require("acceptance4lua.chinese_normalizer")
 local mutator = require("acceptance4lua.mutator")
 local runtime = require("acceptance4lua.runtime")
+local common = require("acceptance4lua.runtime.common")
 
 local function _feature()
   return table.concat({
@@ -96,5 +97,58 @@ describe("acceptance4lua", function()
     assert.are.equal("m1", mutations[1].id)
     assert.are.equal("$.scenarios[0].examples[0].raw", mutations[1].path)
     assert.are_not.equal(mutations[1].original, mutations[1].mutated)
+  end)
+
+  it("does not rewrite a feature when differential mutation skips every scenario", function()
+    local original_runner = package.loaded["acceptance4lua.runner"]
+    local original_mutator = package.loaded["acceptance4lua.mutator"]
+    package.loaded["acceptance4lua.runner"] = {
+      is_infrastructure_error = function()
+        return false
+      end,
+      run_generated = function()
+        return {
+          passed = false,
+          output = "",
+          error = "",
+          duration = 0,
+        }
+      end,
+    }
+    package.loaded["acceptance4lua.mutator"] = nil
+
+    local isolated_mutator = require("acceptance4lua.mutator")
+    local tmp_root = common.make_temp_path("acceptance4lua_mutator_idempotent_", "")
+    common.remove_path(tmp_root)
+    assert(common.ensure_dir(tmp_root))
+    local feature_path = tmp_root .. "/a.feature"
+    assert(common.write_file(feature_path, _feature()))
+
+    local ok, err = xpcall(function()
+      assert(isolated_mutator.run({
+        feature = feature_path,
+        work_dir = tmp_root .. "/work1",
+        level = "hard",
+      }))
+      local first_content = assert(common.read_file(feature_path))
+
+      local second = assert(isolated_mutator.run({
+        feature = feature_path,
+        work_dir = tmp_root .. "/work2",
+        level = "hard",
+      }))
+      local second_content = assert(common.read_file(feature_path))
+
+      assert.are.equal(1, second.summary.skipped_scenarios)
+      assert.are.equal(0, second.summary.total)
+      assert.are.equal(first_content, second_content)
+    end, debug.traceback)
+
+    common.remove_path(tmp_root)
+    package.loaded["acceptance4lua.runner"] = original_runner
+    package.loaded["acceptance4lua.mutator"] = original_mutator
+    if not ok then
+      error(err)
+    end
   end)
 end)
