@@ -2,7 +2,8 @@ local json = require("acceptance4lua.json")
 
 local report = {}
 
-function report.format_text_report(report_data)
+function report.format_text_report(report_data, opts)
+  opts = opts or {}
   local lines = {}
   local summary = report_data.summary
   lines[#lines + 1] = "total="
@@ -23,21 +24,29 @@ function report.format_text_report(report_data)
       .. tostring(skipped_mutations)
   end
 
+  local omitted_killed = 0
   for _, result in ipairs(report_data.results or {}) do
-    lines[#lines + 1] = string.format(
-      "%-8s %s",
-      result.status,
-      result.mutation.display_description or result.mutation.description
-    )
-    if result.status == "survived" or result.status == "error" then
-      if result.error ~= "" then
-        lines[#lines + 1] = "  error: " .. tostring(result.error)
-      end
-      if result.output ~= "" then
-        lines[#lines + 1] = "  output:"
-        lines[#lines + 1] = result.output
+    if result.status == "killed" and opts.verbose ~= true then
+      omitted_killed = omitted_killed + 1
+    else
+      lines[#lines + 1] = string.format(
+        "%-8s %s",
+        result.status,
+        result.mutation.display_description or result.mutation.description
+      )
+      if result.status == "survived" or result.status == "error" then
+        if result.error ~= "" then
+          lines[#lines + 1] = "  error: " .. tostring(result.error)
+        end
+        if result.output ~= "" then
+          lines[#lines + 1] = "  output:"
+          lines[#lines + 1] = result.output
+        end
       end
     end
+  end
+  if omitted_killed > 0 and (summary.survived > 0 or summary.errors > 0) then
+    lines[#lines + 1] = "omitted_killed=" .. tostring(omitted_killed) .. " (use --verbose for killed details)"
   end
   return table.concat(lines, "\n") .. "\n"
 end

@@ -15,6 +15,7 @@ function M.usage()
     "  --runner-worker <command>",
     "  --implementation-hash <hash>",
     "  --json",
+    "  --verbose",
   }, "\n")
 end
 
@@ -45,6 +46,7 @@ function M.parse_args(args)
     status_interval_seconds = 30,
     status_interval_label = "30s",
     json = false,
+    verbose = false,
   }
 
   local index = 1
@@ -90,6 +92,9 @@ function M.parse_args(args)
       index = index + 2
     elseif value == "--json" then
       options.json = true
+      index = index + 1
+    elseif value == "--verbose" then
+      options.verbose = true
       index = index + 1
     elseif value == "--help" or value == "-h" then
       options.help = true
@@ -142,7 +147,7 @@ function M.main(args)
   if options.json then
     io.write(mutator.format_json_report(report))
   else
-    io.write(mutator.format_text_report(report))
+    io.write(mutator.format_text_report(report, { verbose = options.verbose }))
   end
 
   if report.summary.survived > 0 or report.summary.errors > 0 then
