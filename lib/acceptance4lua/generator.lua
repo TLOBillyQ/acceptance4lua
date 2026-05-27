@@ -53,9 +53,9 @@ end
 
 function generator.generate(ir, opts)
   opts = opts or {}
-  local runtime_module = opts.runtime_module or "acceptance.runtime"
+  local runtime_module = opts.runtime_module or "acceptance4lua.runtime"
   local steps_module = opts.steps_module or "acceptance.steps"
-  local json_module = opts.json_module or "acceptance.json"
+  local json_module = opts.json_module or "acceptance4lua.json"
   return table.concat({
     "-- luacheck: globals describe it",
     'local runtime = require("' .. runtime_module .. '")',

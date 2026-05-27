@@ -27,19 +27,20 @@ lib/acceptance4lua/
   *.lua                parser, generator, runtime, source maps, hashes
 ```
 
-## Host Facade
+## Generated Specs
 
-Generated busted specs default to the historical facade modules:
+Generated busted specs default to the portable framework modules and the
+host-provided step namespace:
 
 ```lua
-require("acceptance.runtime")
+require("acceptance4lua.runtime")
 require("acceptance.steps")
-require("acceptance.json")
+require("acceptance4lua.json")
 ```
 
 This lets a host keep project step handlers under `acceptance.steps` while the
-portable framework lives under `acceptance4lua.*`. The generator also accepts
-module-name overrides for hosts that do not want a facade.
+portable framework lives directly under `acceptance4lua.*`. The generator also
+accepts module-name overrides for hosts with different namespaces.
 
 ## Tests
 

@@ -54,14 +54,15 @@ describe("acceptance4lua", function()
     assert.same({ ["原始文本"] = "原始文本", ["结果"] = "结果" }, normalized.source_map.field_names)
   end)
 
-  it("generates deterministic busted entrypoints using project facade modules by default", function()
+  it("generates deterministic busted entrypoints using framework modules by default", function()
     local ir = assert(parser.parse_text(_feature()))
     local first = generator.generate(ir)
     local second = generator.generate(ir)
 
     assert.are.equal(first, second)
-    assert.is_truthy(first:find('require("acceptance.runtime")', 1, true))
+    assert.is_truthy(first:find('require("acceptance4lua.runtime")', 1, true))
     assert.is_truthy(first:find('require("acceptance.steps")', 1, true))
+    assert.is_truthy(first:find('require("acceptance4lua.json")', 1, true))
     assert.is_truthy(first:find('ACCEPTANCE_FEATURE_JSON', 1, true))
   end)
 
