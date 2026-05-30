@@ -190,6 +190,12 @@ end
 
 function chinese_normalizer.normalize_text(text, opts)
   opts = opts or {}
+  text = tostring(text or "")
+  -- 剥除 UTF-8 BOM（EF BB BF）：否则首行变成 "\xEF\xBB\xBF# language: zh-CN"，
+  -- _trim 无法识别语言标记，整份业务源文件会被误判拒绝。
+  if text:sub(1, 3) == "\239\187\191" then
+    text = text:sub(4)
+  end
   local lines = _split_lines(text)
   local first_line = lines[1] or ""
   local path = opts.path

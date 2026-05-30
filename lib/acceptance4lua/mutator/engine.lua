@@ -56,35 +56,60 @@ local function _mutate_list_value(trimmed, seed, path)
   return table.concat(values, ", ")
 end
 
+-- 收集每个 UTF-8 字符的起始字节下标。续字节（0x80-0xBF）归属前一个字符，
+-- 因此切点只会落在字符边界上，永不撕裂多字节汉字。对畸形字节也稳健：
+-- 任何非续字节都视为新字符起点。
+local function _char_starts(text)
+  local starts = {}
+  for index = 1, #text do
+    local byte = text:byte(index)
+    if byte < 0x80 or byte >= 0xC0 then
+      starts[#starts + 1] = index
+    end
+  end
+  return starts
+end
+
+-- 对单个字符做确定性微扰：ASCII 字母/数字按字母表前进一位（保持旧行为），
+-- 多字节字符或其它字节一律替换为 "x"，结果始终是合法 UTF-8。
+local function _dither_char(original)
+  if #original ~= 1 then
+    return "x"
+  end
+  local byte = original:byte()
+  if byte >= 65 and byte <= 89 then
+    return string.char(byte + 1)
+  elseif byte == 90 then
+    return "A"
+  elseif byte >= 97 and byte <= 121 then
+    return string.char(byte + 1)
+  elseif byte == 122 then
+    return "a"
+  elseif byte >= 48 and byte <= 56 then
+    return string.char(byte + 1)
+  elseif byte == 57 then
+    return "0"
+  end
+  return "x"
+end
+
 local function _dither_string(value, seed)
   local text = tostring(value or "")
   if text == "" then
     return "x"
   end
 
-  local index = (seed % #text) + 1
-  local original = text:sub(index, index)
-  local byte = original:byte() or 120
-  local replacement
-  if byte >= 65 and byte <= 89 then
-    replacement = string.char(byte + 1)
-  elseif byte == 90 then
-    replacement = "A"
-  elseif byte >= 97 and byte <= 121 then
-    replacement = string.char(byte + 1)
-  elseif byte == 122 then
-    replacement = "a"
-  elseif byte >= 48 and byte <= 56 then
-    replacement = string.char(byte + 1)
-  elseif byte == 57 then
-    replacement = "0"
-  else
-    replacement = "x"
-  end
+  local starts = _char_starts(text)
+  local pick = (seed % #starts) + 1
+  local char_start = starts[pick]
+  local char_end = (starts[pick + 1] or (#text + 1)) - 1
+  local original = text:sub(char_start, char_end)
+
+  local replacement = _dither_char(original)
   if replacement == original then
     replacement = "x"
   end
-  return text:sub(1, index - 1) .. replacement .. text:sub(index + 1)
+  return text:sub(1, char_start - 1) .. replacement .. text:sub(char_end + 1)
 end
 
 local function _mutate_date(year, month, day, seed)
