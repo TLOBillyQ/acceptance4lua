@@ -44,7 +44,6 @@ function M.parse_args(args)
     work_dir = "build/acceptance-mutation",
     workers = 1,
     status_interval_seconds = 30,
-    status_interval_label = "30s",
     json = false,
     verbose = false,
   }
@@ -75,7 +74,6 @@ function M.parse_args(args)
       if options.status_interval_seconds == nil then
         return nil, "invalid status interval: " .. tostring(args[index + 1])
       end
-      options.status_interval_label = tostring(args[index + 1])
       index = index + 2
     elseif value == "--level" then
       local level = args[index + 1]

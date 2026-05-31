@@ -4,7 +4,7 @@ local function _number(value)
   return tonumber(value) or 0
 end
 
-function status.snapshot(total, summary, running, interval_label)
+function status.snapshot(total, summary, running, elapsed_label)
   summary = summary or {}
   local skipped_mutations = _number(summary.skipped_mutations)
   local killed = _number(summary.killed)
@@ -14,7 +14,7 @@ function status.snapshot(total, summary, running, interval_label)
     total = _number(total),
     completed = killed + survived + errors + skipped_mutations,
     running = _number(running),
-    interval = tostring(interval_label or ""),
+    elapsed = tostring(elapsed_label or ""),
     killed = killed,
     survived = survived,
     errors = errors,
@@ -27,10 +27,10 @@ function status.format_line(snapshot)
   snapshot = snapshot or {}
   return table.concat({
     "status",
+    "elapsed=" .. tostring(snapshot.elapsed or ""),
     "total=" .. tostring(_number(snapshot.total)),
     "completed=" .. tostring(_number(snapshot.completed)),
     "running=" .. tostring(_number(snapshot.running)),
-    "interval=" .. tostring(snapshot.interval or ""),
     "killed=" .. tostring(_number(snapshot.killed)),
     "survived=" .. tostring(_number(snapshot.survived)),
     "errors=" .. tostring(_number(snapshot.errors)),

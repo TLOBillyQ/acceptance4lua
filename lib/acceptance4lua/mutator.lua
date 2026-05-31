@@ -42,7 +42,7 @@ local function _status_reporter(options, total_mutations)
     return function() end
   end
 
-  local interval_label = options.status_interval_label or (tostring(interval) .. "s")
+  local started_at = os.time()
   local last_emitted_at = nil
   return function(summary, running, force)
     local now = os.time()
@@ -53,8 +53,9 @@ local function _status_reporter(options, total_mutations)
       return
     end
     last_emitted_at = now
+    local elapsed_label = string.format("%ds", os.difftime(now, started_at))
     callback(status_mod.format_line(status_mod.snapshot(
-      total_mutations, summary, running or 0, interval_label
+      total_mutations, summary, running or 0, elapsed_label
     )))
   end
 end
