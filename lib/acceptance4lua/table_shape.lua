@@ -3,6 +3,7 @@ local table_shape = {}
 local ARRAY_KEYS = {
   background = true,
   examples = true,
+  findings = true,
   parameters = true,
   results = true,
   scenarios = true,
