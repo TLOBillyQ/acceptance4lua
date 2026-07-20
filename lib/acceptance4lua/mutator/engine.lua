@@ -240,11 +240,19 @@ function engine.mutate_value(value, path)
   return _dither_string(original, seed)
 end
 
-function engine.build_mutations(ir)
+-- opts.skip_columns 是项目自定义的等价变异过滤器（APS 变异发现算法第 7 步
+-- 预留的 extension point）：列名集合，精确匹配命中时该单元格在创建变异条目
+-- 之前被跳过——不进结果、不计入 total。对固定 IR + 固定过滤器，遍历顺序与
+-- 变异 ID 保持稳定。
+function engine.build_mutations(ir, opts)
+  local skip_columns = (opts or {}).skip_columns
   local mutations = {}
   for scenario_index, scenario in ipairs(ir.scenarios or {}) do
     for example_index, example in ipairs(scenario.examples or {}) do
       for _, key in ipairs(table_shape.sorted_keys(example)) do
+        if skip_columns ~= nil and skip_columns[key] then
+          goto continue
+        end
         local path = "$.scenarios["
           .. tostring(scenario_index - 1)
           .. "].examples["
@@ -270,6 +278,7 @@ function engine.build_mutations(ir)
             key = key,
           }
         end
+        ::continue::
       end
     end
   end

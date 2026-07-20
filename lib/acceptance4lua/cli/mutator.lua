@@ -12,6 +12,7 @@ function M.usage()
     "  --timeout <duration>",
     "  --status-interval <duration>  default: 30s; 0 disables status lines",
     "  --level <level>    differential mutation level: full|hard|soft (default: hard)",
+    "  --skip-columns <names>  comma-separated example columns excluded from mutation",
     "  --runner-worker <command>",
     "  --implementation-hash <hash>",
     "  --json",
@@ -20,6 +21,21 @@ function M.usage()
 end
 
 local _VALID_LEVELS = { full = true, hard = true, soft = true }
+
+-- 把逗号分隔的列名列表解析为集合（列名精确匹配，含 CJK 列名；空格裁剪）。
+local function _parse_column_set(value)
+  if value == nil then
+    return nil
+  end
+  local columns = {}
+  for item in tostring(value):gmatch("([^,]+)") do
+    local name = item:match("^%s*(.-)%s*$")
+    if name ~= "" then
+      columns[name] = true
+    end
+  end
+  return columns
+end
 
 local function _parse_duration(value)
   if value == nil then
@@ -81,6 +97,13 @@ function M.parse_args(args)
         return nil, "invalid level: " .. tostring(level)
       end
       options.level = level
+      index = index + 2
+    elseif value == "--skip-columns" then
+      local columns = _parse_column_set(args[index + 1])
+      if columns == nil then
+        return nil, "missing --skip-columns value"
+      end
+      options.skip_columns = columns
       index = index + 2
     elseif value == "--runner-worker" then
       options.runner_worker = args[index + 1]

@@ -2,6 +2,7 @@ local parser = require("acceptance4lua.gherkin_parser")
 local generator = require("acceptance4lua.generator")
 local normalizer = require("acceptance4lua.chinese_normalizer")
 local mutator = require("acceptance4lua.mutator")
+local cli_mutator = require("acceptance4lua.cli.mutator")
 local engine = require("acceptance4lua.mutator.engine")
 local runtime = require("acceptance4lua.runtime")
 local common = require("acceptance4lua.runtime.common")
@@ -153,6 +154,61 @@ describe("acceptance4lua", function()
     assert.are.equal("m1", mutations[1].id)
     assert.are.equal("$.scenarios[0].examples[0].raw", mutations[1].path)
     assert.are_not.equal(mutations[1].original, mutations[1].mutated)
+  end)
+
+  it("skips mutation entries for columns named by the equivalent-mutation filter", function()
+    local ir = assert(parser.parse_text(_feature()))
+    local mutations = mutator.build_mutations(ir, { skip_columns = { result = true } })
+
+    assert.are.equal(1, #mutations)
+    assert.are.equal("$.scenarios[0].examples[0].raw", mutations[1].path)
+    assert.are.equal("raw", mutations[1].key)
+  end)
+
+  it("keeps mutation ids and paths stable for a fixed IR and fixed skip filter", function()
+    local ir = assert(parser.parse_text(_feature()))
+    local opts = { skip_columns = { result = true } }
+    local first = mutator.build_mutations(ir, opts)
+    local second = mutator.build_mutations(ir, opts)
+
+    assert.are.equal(#first, #second)
+    for index = 1, #first do
+      assert.are.equal(first[index].id, second[index].id)
+      assert.are.equal(first[index].path, second[index].path)
+      assert.are.equal(first[index].mutated, second[index].mutated)
+    end
+  end)
+
+  it("builds the same mutations as before when no skip filter is given", function()
+    local ir = assert(parser.parse_text(_feature()))
+    local plain = mutator.build_mutations(ir)
+    local empty_opts = mutator.build_mutations(ir, {})
+    local empty_filter = mutator.build_mutations(ir, { skip_columns = {} })
+
+    assert.are.equal(#plain, #empty_opts)
+    assert.are.equal(#plain, #empty_filter)
+    for index = 1, #plain do
+      assert.are.equal(plain[index].id, empty_opts[index].id)
+      assert.are.equal(plain[index].path, empty_opts[index].path)
+      assert.are.equal(plain[index].id, empty_filter[index].id)
+      assert.are.equal(plain[index].path, empty_filter[index].path)
+    end
+  end)
+
+  it("parses --skip-columns into an exact-match column set", function()
+    local options = assert(cli_mutator.parse_args({
+      "--runner-worker", "true",
+      "--skip-columns", "角色ID, 观察角色ID ,,",
+    }))
+
+    assert.same({ ["角色ID"] = true, ["观察角色ID"] = true }, options.skip_columns)
+
+    local missing, err = cli_mutator.parse_args({ "--skip-columns" })
+    assert.is_nil(missing)
+    assert.is_truthy(err)
+
+    local without = assert(cli_mutator.parse_args({ "--runner-worker", "true" }))
+    assert.is_nil(without.skip_columns)
   end)
 
   it("does not rewrite a feature when differential mutation skips every scenario", function()

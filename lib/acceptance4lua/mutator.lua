@@ -500,7 +500,7 @@ function mutator.run(options)
     or _read_generated_implementation_hash(options.generated_path, options.feature)
     or spec_hash.compute_generated_files_hash({ options.generated_path })
 
-  local mutations = engine.build_mutations(base_ir)
+  local mutations = engine.build_mutations(base_ir, { skip_columns = options.skip_columns })
   local progress = {
     killed = 0,
     survived = 0,
