@@ -143,6 +143,8 @@ local function _run_one(base_ir, mutation, options)
 
   local run = runner.run_generated(options.generated_path, {
     feature_json = feature_json,
+    lua_bin = options.lua_bin,
+    lua_path = options.lua_path,
   })
   if run.error ~= "" then
     return _result_for_error(mutation, run.error, run.duration)
@@ -157,15 +159,13 @@ local function _run_one(base_ir, mutation, options)
   }
 end
 
--- 并行批：跟 runner.run_generated 同语义，但用 parallel_lanes 一次调度 N 个 busted。
-local function _busted_lane_cmd(generated_path, feature_json)
-  local busted_bin = os.getenv("BUSTED_BIN") or "busted"
-  return "ACCEPTANCE_FEATURE_JSON="
-    .. common.shell_quote(feature_json)
-    .. " "
-    .. common.shell_quote(busted_bin)
-    .. " --helper=spec/helper.lua --output=TAP "
-    .. common.shell_quote(generated_path)
+-- 并行批：跟 runner.run_generated 同语义，但用 parallel_lanes 一次调度 N 个 lua 子进程。
+local function _lane_cmd(generated_path, feature_json, options)
+  return runner.build_command(generated_path, {
+    feature_json = feature_json,
+    lua_bin = options.lua_bin,
+    lua_path = options.lua_path,
+  })
 end
 
 local function _result_from_lane(prepared, lane_result)
@@ -174,7 +174,7 @@ local function _result_from_lane(prepared, lane_result)
   if runner.is_infrastructure_error(lane_result.exit_code, output) then
     return _result_for_error(
       prepared.mutation,
-      _error_message(output, "busted infrastructure error (exit " .. tostring(lane_result.exit_code) .. ")"),
+      _error_message(output, "lua infrastructure error (exit " .. tostring(lane_result.exit_code) .. ")"),
       duration
     )
   end
@@ -187,12 +187,12 @@ local function _result_from_lane(prepared, lane_result)
   }
 end
 
-local function _run_parallel_batch(prepared_batch)
+local function _run_parallel_batch(prepared_batch, options)
   local lanes = {}
   for index, prepared in ipairs(prepared_batch) do
     lanes[index] = {
       label = prepared.mutation.id,
-      cmd = _busted_lane_cmd(prepared.generated_path, prepared.feature_json),
+      cmd = _lane_cmd(prepared.generated_path, prepared.feature_json, options),
     }
   end
   -- parallel_lanes.run 在 launcher 写盘/启动失败时会 error()，与
@@ -226,14 +226,14 @@ local function _run_sequential(base_ir, mutations, options, timed_out)
 end
 
 -- 并行执行：准备阶段顺序写文件（mkdir/写盘 race-free），
--- 执行阶段每 workers 个一批并发跑 busted。
+-- 执行阶段每 workers 个一批并发跑生成的入口。
 local function _run_parallel(base_ir, mutations, options, timed_out)
   local results = {}
   local batch = {}
 
   local function flush()
     if #batch == 0 then return end
-    for _, r in ipairs(_run_parallel_batch(batch)) do
+    for _, r in ipairs(_run_parallel_batch(batch, options)) do
       results[#results + 1] = r
     end
     batch = {}

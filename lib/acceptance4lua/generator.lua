@@ -60,8 +60,10 @@ function generator.generate(ir, opts)
   local runtime_module = opts.runtime_module or "acceptance4lua.runtime"
   local steps_module = opts.steps_module or "acceptance.steps"
   local json_module = opts.json_module or "acceptance4lua.json"
+  local harness_module = opts.harness_module or "acceptance4lua.harness"
   return table.concat({
     "-- luacheck: globals describe it",
+    _require_line("harness", harness_module),
     _require_line("runtime", runtime_module),
     _require_line("steps", steps_module),
     _require_line("json", json_module),
@@ -82,8 +84,10 @@ function generator.generate(ir, opts)
     "local ir = load_ir()",
     "",
     "describe(\"Acceptance: \" .. tostring(ir.name), function()",
-    "  runtime.define_busted_specs(ir, steps.handlers(), it)",
+    "  runtime.define_specs(ir, steps.handlers(), it)",
     "end)",
+    "",
+    "os.exit(harness.run() and 0 or 1)",
     "",
   }, "\n")
 end

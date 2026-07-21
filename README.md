@@ -8,7 +8,8 @@ It provides:
 - a deterministic Gherkin subset parser;
 - a Chinese `# language: zh-CN` normalizer for the supported keyword set;
 - JSON IR encoding and decoding;
-- a thin busted entrypoint generator;
+- a thin standalone acceptance entrypoint generator (self-contained harness,
+  no external test framework needed);
 - a report-only IR-DRY checker with CJK-aware similarity scoring;
 - a runtime that dispatches exact step text to project step handlers;
 - Gherkin example-value mutation with feature stamps, scenario manifests,
@@ -30,10 +31,11 @@ lib/acceptance4lua/
 
 ## Generated Specs
 
-Generated busted specs default to the portable framework modules and the
-host-provided step namespace:
+Generated entrypoints are standalone Lua scripts. They default to the portable
+framework modules and the host-provided step namespace:
 
 ```lua
+require("acceptance4lua.harness")
 require("acceptance4lua.runtime")
 require("acceptance.steps")
 require("acceptance4lua.json")
@@ -43,10 +45,22 @@ This lets a host keep project step handlers under `acceptance.steps` while the
 portable framework lives directly under `acceptance4lua.*`. The generator also
 accepts module-name overrides for hosts with different namespaces.
 
-## Tests
+Run a generated entrypoint with any Lua interpreter; `LUA_PATH` must cover the
+framework and host modules (the runner sets it for you, and honors the
+`ACCEPTANCE_LUA_BIN` / `ACCEPTANCE_LUA_PATH` overrides):
 
 ```sh
-busted
+LUA_PATH='lib/?.lua;lib/?/init.lua;;' lua path/to/generated_spec.lua
+```
+
+## Tests
+
+The test suite runs on a self-contained minimal harness (`spec/harness.lua`)
+that provides the busted-style `describe`/`it`/`assert` API, so no external
+test dependency is needed:
+
+```sh
+lua spec/run.lua
 ```
 
 ## Relationship To APS

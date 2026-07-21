@@ -96,9 +96,9 @@ function runtime.format_failures(result)
   return table.concat(lines, "\n")
 end
 
-function runtime.define_busted_specs(ir, handlers, define_it)
+function runtime.define_specs(ir, handlers, define_it)
   define_it = define_it or rawget(_G, "it")
-  assert(define_it ~= nil, "missing busted it function")
+  assert(define_it ~= nil, "missing it function (require acceptance4lua.harness first)")
   for _, scenario in ipairs(ir.scenarios or {}) do
     for example_index, example in ipairs(_execution_examples(scenario)) do
       local name = _execution_name(scenario, example_index)

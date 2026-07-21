@@ -5,6 +5,7 @@ local mutator = require("acceptance4lua.mutator")
 local cli_mutator = require("acceptance4lua.cli.mutator")
 local engine = require("acceptance4lua.mutator.engine")
 local runtime = require("acceptance4lua.runtime")
+local runner = require("acceptance4lua.runner")
 local common = require("acceptance4lua.runtime.common")
 
 -- 校验字符串是否为合法 UTF-8（Lua 5.4 的 utf8.len 在非法字节处返回 nil）。
@@ -112,16 +113,76 @@ describe("acceptance4lua", function()
     assert.is_truthy(normalized.text:find("Scenario: 普通场景", 1, true))
   end)
 
-  it("generates deterministic busted entrypoints using framework modules by default", function()
+  it("generates deterministic standalone entrypoints using framework modules by default", function()
     local ir = assert(parser.parse_text(_feature()))
     local first = generator.generate(ir)
     local second = generator.generate(ir)
 
     assert.are.equal(first, second)
+    assert.is_truthy(first:find('require("acceptance4lua.harness")', 1, true))
     assert.is_truthy(first:find('require("acceptance4lua.runtime")', 1, true))
     assert.is_truthy(first:find('require("acceptance.steps")', 1, true))
     assert.is_truthy(first:find('require("acceptance4lua.json")', 1, true))
     assert.is_truthy(first:find('ACCEPTANCE_FEATURE_JSON', 1, true))
+    assert.is_truthy(first:find('runtime.define_specs(ir, steps.handlers(), it)', 1, true))
+    assert.is_truthy(first:find('os.exit(harness.run() and 0 or 1)', 1, true))
+  end)
+
+  it("runs a generated entrypoint through the lua launcher end to end", function()
+    local ir = assert(parser.parse_text(_feature()))
+    local tmp_root = common.make_temp_path("acceptance4lua_runner_e2e_", "")
+    common.remove_path(tmp_root)
+    assert(common.ensure_dir(tmp_root .. "/acceptance"))
+
+    local generated_path = tmp_root .. "/generated_spec.lua"
+    assert(common.write_file(generated_path, generator.generate(ir)))
+
+    -- 宿主提供的 step handlers：生成的入口默认 require("acceptance.steps")。
+    local function _write_steps(handlers_body)
+      assert(common.write_file(tmp_root .. "/acceptance/steps.lua", table.concat({
+        "return {",
+        "  handlers = function()",
+        "    return {",
+        handlers_body,
+        "    }",
+        "  end,",
+        "}",
+      }, "\n")))
+    end
+
+    local lua_path = "lib/?.lua;lib/?/init.lua;" .. tmp_root .. "/?.lua;;"
+    local ok, err = xpcall(function()
+      _write_steps([[
+      ["handlers are loaded"] = function(world) world.loaded = true end,
+      ["a text value <raw>"] = function(world, example) world.raw = example.raw end,
+      ["it is parsed"] = function(world) world.result = tonumber(world.raw) end,
+      ["the result is <result>"] = function(world, example)
+        assert(world.loaded)
+        assert(tonumber(example.result) == world.result, "result mismatch")
+      end,
+]])
+      local passing = runner.run_generated(generated_path, { lua_path = lua_path })
+      assert.are.equal("", passing.error)
+      assert.is_true(passing.passed, passing.output)
+
+      _write_steps([[
+      ["handlers are loaded"] = function(world) world.loaded = true end,
+      ["a text value <raw>"] = function(world, example) world.raw = example.raw end,
+      ["it is parsed"] = function(world) world.result = -1 end,
+      ["the result is <result>"] = function(world, example)
+        assert(tonumber(example.result) == world.result, "result mismatch")
+      end,
+]])
+      local failing = runner.run_generated(generated_path, { lua_path = lua_path })
+      assert.are.equal("", failing.error)
+      assert.is_true(not failing.passed)
+      assert.is_truthy(failing.output:find("result mismatch", 1, true))
+    end, debug.traceback)
+
+    common.remove_path(tmp_root)
+    if not ok then
+      error(err)
+    end
   end)
 
   it("runs exact text step handlers through the runtime", function()

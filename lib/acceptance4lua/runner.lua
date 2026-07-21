@@ -2,7 +2,7 @@ local common = require("acceptance4lua.runtime.common")
 
 local runner = {}
 
--- busted launcher 找不到 / 命令缺失等"基础设施"错误的统一判定。
+-- launcher（lua 解释器）找不到 / 命令缺失等"基础设施"错误的统一判定。
 -- 与 mutator 并行批的 lane 结果共用，避免两处分别维护启发式。
 function runner.is_infrastructure_error(exit_code, output)
   if exit_code == 127 then
@@ -11,22 +11,38 @@ function runner.is_infrastructure_error(exit_code, output)
   return tostring(output or ""):find("not found", 1, true) ~= nil
 end
 
-local function _busted_command(path)
-  local busted_bin = os.getenv("BUSTED_BIN") or "busted"
-  return common.shell_quote(busted_bin)
-    .. " --helper=spec/helper.lua --output=TAP "
-    .. common.shell_quote(path)
+-- 生成的入口是独立 lua 脚本（自带 harness，结尾 os.exit）。
+-- 通过 LUA_PATH 指到宿主的 lib/ 布局，替代旧 busted --helper 机制；
+-- 宿主可用 ACCEPTANCE_LUA_BIN / ACCEPTANCE_LUA_PATH 或 opts 覆盖。
+local function _lua_bin(opts)
+  return (opts and opts.lua_bin) or os.getenv("ACCEPTANCE_LUA_BIN") or "lua"
 end
 
-function runner.run_generated(path, opts)
-  local start_time = os.clock()
-  local command = _busted_command(path)
+local function _lua_path(opts)
+  return (opts and opts.lua_path)
+    or os.getenv("ACCEPTANCE_LUA_PATH")
+    or "lib/?.lua;lib/?/init.lua;;"
+end
+
+function runner.build_command(path, opts)
+  local command = "LUA_PATH="
+    .. common.shell_quote(_lua_path(opts))
+    .. " "
+    .. common.shell_quote(_lua_bin(opts))
+    .. " "
+    .. common.shell_quote(path)
   if opts ~= nil and opts.feature_json ~= nil and opts.feature_json ~= "" then
     command = "ACCEPTANCE_FEATURE_JSON="
       .. common.shell_quote(opts.feature_json)
       .. " "
       .. command
   end
+  return command
+end
+
+function runner.run_generated(path, opts)
+  local start_time = os.clock()
+  local command = runner.build_command(path, opts)
   local result = common.run_command(command, opts and opts.cwd and { cwd = opts.cwd } or nil)
 
   local output = result.output or ""
@@ -37,7 +53,7 @@ function runner.run_generated(path, opts)
     if output ~= "" then
       infrastructure_error = output
     else
-      infrastructure_error = "busted launcher failed with exit code " .. tostring(result.code)
+      infrastructure_error = "lua launcher failed with exit code " .. tostring(result.code)
     end
   end
 
