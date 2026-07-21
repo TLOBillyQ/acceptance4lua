@@ -2,19 +2,21 @@ local table_shape = require("acceptance4lua.table_shape")
 
 local json = {}
 
+local ESCAPE_MAP = {
+  ["\\"] = "\\\\",
+  ["\""] = "\\\"",
+  ["\b"] = "\\b",
+  ["\f"] = "\\f",
+  ["\n"] = "\\n",
+  ["\r"] = "\\r",
+  ["\t"] = "\\t",
+}
+
 local function _escape_string(value)
-  local escaped = tostring(value or "")
-  escaped = escaped:gsub("\\", "\\\\")
-  escaped = escaped:gsub("\"", "\\\"")
-  escaped = escaped:gsub("\b", "\\b")
-  escaped = escaped:gsub("\f", "\\f")
-  escaped = escaped:gsub("\n", "\\n")
-  escaped = escaped:gsub("\r", "\\r")
-  escaped = escaped:gsub("\t", "\\t")
-  return escaped
+  return (tostring(value or ""):gsub("[\\\"%c]", ESCAPE_MAP))
 end
 
-local function _encode(value, indent, key_hint)
+local function _encode_scalar(value)
   local value_type = type(value)
   if value == nil then
     return "null"
@@ -27,6 +29,14 @@ local function _encode(value, indent, key_hint)
   end
   if value_type ~= "table" then
     return "\"" .. _escape_string(value) .. "\""
+  end
+  return nil
+end
+
+local function _encode(value, indent, key_hint)
+  local scalar = _encode_scalar(value)
+  if scalar ~= nil then
+    return scalar
   end
 
   local next_indent = indent + 2
@@ -61,18 +71,9 @@ local function _encode(value, indent, key_hint)
 end
 
 local function _encode_compact(value, key_hint)
-  local value_type = type(value)
-  if value == nil then
-    return "null"
-  end
-  if value_type == "string" then
-    return "\"" .. _escape_string(value) .. "\""
-  end
-  if value_type == "boolean" or value_type == "number" then
-    return tostring(value)
-  end
-  if value_type ~= "table" then
-    return "\"" .. _escape_string(value) .. "\""
+  local scalar = _encode_scalar(value)
+  if scalar ~= nil then
+    return scalar
   end
 
   if table_shape.is_array(value, key_hint) then
@@ -113,48 +114,46 @@ end
 local function _parse_string(text, index)
   local cursor = index + 1
   local parts = {}
-  while cursor <= #text do
-    local ch = _char_at(text, cursor)
-    if ch == "\"" then
-      return table.concat(parts), cursor + 1
+  while true do
+    local next_special = text:find("[\"\\]", cursor)
+    if next_special == nil then
+      _decode_error("unterminated string", index)
     end
-    if ch == "\\" then
-      local escaped = _char_at(text, cursor + 1)
-      if escaped == "\"" or escaped == "\\" or escaped == "/" then
-        parts[#parts + 1] = escaped
-      elseif escaped == "b" then
-        parts[#parts + 1] = "\b"
-      elseif escaped == "f" then
-        parts[#parts + 1] = "\f"
-      elseif escaped == "n" then
-        parts[#parts + 1] = "\n"
-      elseif escaped == "r" then
-        parts[#parts + 1] = "\r"
-      elseif escaped == "t" then
-        parts[#parts + 1] = "\t"
-      else
-        _decode_error("unsupported escape sequence", cursor)
-      end
-      cursor = cursor + 2
+    if next_special > cursor then
+      parts[#parts + 1] = text:sub(cursor, next_special - 1)
+    end
+    if _char_at(text, next_special) == "\"" then
+      return table.concat(parts), next_special + 1
+    end
+    local escaped = _char_at(text, next_special + 1)
+    if escaped == "\"" or escaped == "\\" or escaped == "/" then
+      parts[#parts + 1] = escaped
+    elseif escaped == "b" then
+      parts[#parts + 1] = "\b"
+    elseif escaped == "f" then
+      parts[#parts + 1] = "\f"
+    elseif escaped == "n" then
+      parts[#parts + 1] = "\n"
+    elseif escaped == "r" then
+      parts[#parts + 1] = "\r"
+    elseif escaped == "t" then
+      parts[#parts + 1] = "\t"
+    elseif escaped == "" then
+      _decode_error("unterminated string", index)
     else
-      parts[#parts + 1] = ch
-      cursor = cursor + 1
+      _decode_error("unsupported escape sequence '\\" .. escaped .. "'", next_special)
     end
+    cursor = next_special + 2
   end
-  _decode_error("unterminated string", index)
 end
 
 local function _parse_number(text, index)
-  local cursor = index
-  while cursor <= #text and _char_at(text, cursor):match("[%d%+%-%e%E%.]") do
-    cursor = cursor + 1
-  end
-  local raw = text:sub(index, cursor - 1)
+  local raw = text:match("^[0-9eE+%-.]*", index)
   local value = tonumber(raw)
   if value == nil then
-    _decode_error("invalid number", index)
+    _decode_error("invalid number '" .. raw .. "'", index)
   end
-  return value, cursor
+  return value, index + #raw
 end
 
 local function _parse_literal(text, index, literal, value)
@@ -258,9 +257,10 @@ function json.encode_compact(value)
 end
 
 function json.decode(text)
-  local value, cursor = _parse_value(tostring(text or ""), 1)
-  cursor = _skip_whitespace(tostring(text or ""), cursor)
-  if cursor <= #(text or "") then
+  local source = tostring(text or "")
+  local value, cursor = _parse_value(source, 1)
+  cursor = _skip_whitespace(source, cursor)
+  if cursor <= #source then
     _decode_error("trailing content", cursor)
   end
   return value

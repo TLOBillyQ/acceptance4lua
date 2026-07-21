@@ -69,8 +69,11 @@ function common.read_file(path)
   if file == nil then
     return nil, err
   end
-  local content = file:read("*a")
+  local content, read_err = file:read("*a")
   file:close()
+  if content == nil then
+    return nil, read_err
+  end
   return content
 end
 
@@ -84,8 +87,14 @@ function common.write_file(path, content)
   if file == nil then
     return nil, open_err
   end
-  file:write(tostring(content or ""))
-  file:close()
+  local write_ok, write_err = file:write(tostring(content or ""))
+  local close_ok, close_err = file:close()
+  if write_ok == nil then
+    return nil, write_err
+  end
+  if close_ok == nil then
+    return nil, close_err
+  end
   return true
 end
 
@@ -111,7 +120,14 @@ function common.ensure_dir(path)
   if normalized == "" or normalized == "." then
     return true
   end
-  local command = (_is_windows() and "mkdir " or "mkdir -p ") .. common.shell_quote(normalized)
+  -- cmd 的 mkdir 在目录已存在时报错，先判存在，对齐 mkdir -p 的幂等语义。
+  local quoted = common.shell_quote(normalized)
+  local command
+  if _is_windows() then
+    command = "if not exist " .. quoted .. " mkdir " .. quoted
+  else
+    command = "mkdir -p " .. quoted
+  end
   local ok, kind, code = os.execute(command)
   local success, exit_code = _os_success(ok, kind, code)
   if success then
@@ -124,7 +140,15 @@ function common.remove_path(path)
   if path == nil or path == "" then
     return true
   end
-  local command = (_is_windows() and "rmdir /s /q " or "rm -rf ") .. common.shell_quote(path)
+  -- cmd 的 rmdir 删不了文件、del 删不了目录，按类型分发；路径不存在时直接成功，对齐 rm -rf。
+  local command
+  if _is_windows() then
+    local quoted = common.shell_quote(path)
+    command = "if exist " .. quoted .. " (if exist " .. common.shell_quote(path .. "\\")
+      .. " (rmdir /s /q " .. quoted .. ") else (del /q /f " .. quoted .. "))"
+  else
+    command = "rm -rf " .. common.shell_quote(path)
+  end
   local ok, kind, code = os.execute(command)
   local success, exit_code = _os_success(ok, kind, code)
   if success then

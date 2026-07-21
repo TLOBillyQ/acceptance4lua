@@ -20,26 +20,25 @@ end
 
 function runner.run_generated(path, opts)
   local start_time = os.clock()
-  local command
+  local command = _busted_command(path)
   if opts ~= nil and opts.feature_json ~= nil and opts.feature_json ~= "" then
     command = "ACCEPTANCE_FEATURE_JSON="
       .. common.shell_quote(opts.feature_json)
       .. " "
-      .. _busted_command(path)
-  else
-    command = {
-      os.getenv("BUSTED_BIN") or "busted",
-      "--helper=spec/helper.lua",
-      "--output=TAP",
-      path,
-    }
+      .. command
   end
   local result = common.run_command(command, opts and opts.cwd and { cwd = opts.cwd } or nil)
 
   local output = result.output or ""
   local infrastructure_error = ""
   if runner.is_infrastructure_error(result.code, output) then
-    infrastructure_error = output
+    -- output 可能为空（launcher 静默退出 127 等）：此时也必须给出非空错误，
+    -- 下游 mutator 以 error ~= "" 判定基础设施错误，空串会被误当成普通失败。
+    if output ~= "" then
+      infrastructure_error = output
+    else
+      infrastructure_error = "busted launcher failed with exit code " .. tostring(result.code)
+    end
   end
 
   return {

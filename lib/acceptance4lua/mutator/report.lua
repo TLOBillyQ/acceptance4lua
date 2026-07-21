@@ -2,6 +2,11 @@ local json = require("acceptance4lua.json")
 
 local report = {}
 
+local function _skipped_counts(summary)
+  return tonumber(summary.skipped_scenarios) or 0,
+    tonumber(summary.skipped_mutations) or 0
+end
+
 function report.format_text_report(report_data, opts)
   opts = opts or {}
   local lines = {}
@@ -15,8 +20,7 @@ function report.format_text_report(report_data, opts)
     .. " errors="
     .. tostring(summary.errors)
 
-  local skipped_scenarios = tonumber(summary.skipped_scenarios) or 0
-  local skipped_mutations = tonumber(summary.skipped_mutations) or 0
+  local skipped_scenarios, skipped_mutations = _skipped_counts(summary)
   if skipped_scenarios > 0 or skipped_mutations > 0 then
     lines[#lines + 1] = "skipped_scenarios="
       .. tostring(skipped_scenarios)
@@ -35,35 +39,37 @@ function report.format_text_report(report_data, opts)
         result.mutation.display_description or result.mutation.description
       )
       if result.status == "survived" or result.status == "error" then
-        if result.error ~= "" then
+        if result.error ~= nil and result.error ~= "" then
           lines[#lines + 1] = "  error: " .. tostring(result.error)
         end
-        if result.output ~= "" then
+        if result.output ~= nil and result.output ~= "" then
           lines[#lines + 1] = "  output:"
           lines[#lines + 1] = result.output
         end
       end
     end
   end
-  if omitted_killed > 0 and (summary.survived > 0 or summary.errors > 0) then
+  if omitted_killed > 0
+    and ((tonumber(summary.survived) or 0) > 0 or (tonumber(summary.errors) or 0) > 0)
+  then
     lines[#lines + 1] = "omitted_killed=" .. tostring(omitted_killed) .. " (use --verbose for killed details)"
   end
   return table.concat(lines, "\n") .. "\n"
 end
 
 function report.format_json_report(report_data)
+  local summary = report_data.summary
   local encoded = {
     summary = {
-      Total = report_data.summary.total,
-      Killed = report_data.summary.killed,
-      Survived = report_data.summary.survived,
-      Errors = report_data.summary.errors,
+      Total = summary.total,
+      Killed = summary.killed,
+      Survived = summary.survived,
+      Errors = summary.errors,
     },
     results = {},
   }
 
-  local skipped_scenarios = tonumber(report_data.summary.skipped_scenarios) or 0
-  local skipped_mutations = tonumber(report_data.summary.skipped_mutations) or 0
+  local skipped_scenarios, skipped_mutations = _skipped_counts(summary)
   if skipped_scenarios > 0 or skipped_mutations > 0 then
     encoded.summary.SkippedScenarios = skipped_scenarios
     encoded.summary.SkippedMutations = skipped_mutations

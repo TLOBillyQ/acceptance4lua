@@ -18,6 +18,12 @@ local function _is_features_path(path)
 end
 
 local function _english_keyword(line)
+  -- 所有英文关键字都以 ASCII 大写字母开头：中文行（UTF-8 首字节 >= 0x80）
+  -- 与其余行在此直接短路，避免逐行做 9 次必然落空的 pattern 匹配。
+  local first_byte = line:byte(1)
+  if first_byte == nil or first_byte < 65 or first_byte > 90 then
+    return nil
+  end
   local keyword = line:match("^(Feature):")
     or line:match("^(Background):")
     or line:match("^(Scenario Outline):")
@@ -138,7 +144,7 @@ local function _normalize_chinese_lines(lines, context)
 
   for line_number, raw_line in ipairs(lines) do
     local line = _trim(raw_line)
-    local indent = raw_line:match("^(%s*)") or ""
+    local indent = raw_line:match("^(%s*)")
     context.line_by_normalized_line[line_number] = line_number
 
     if line == "" or line:sub(1, 1) == "#" then
@@ -207,7 +213,7 @@ function chinese_normalizer.normalize_text(text, opts)
 
   if not is_chinese then
     return {
-      text = tostring(text or ""),
+      text = text,
       source_map = {
         path = path,
         language = "aps",

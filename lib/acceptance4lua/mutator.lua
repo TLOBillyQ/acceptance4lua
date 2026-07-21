@@ -60,12 +60,8 @@ local function _status_reporter(options, total_mutations)
   end
 end
 
+-- common.write_file 内部已 ensure_dir 父目录，这里不再重复起一次 mkdir。
 local function _write_mutation_ir(path, ir)
-  local parent = common.parent_dir(path)
-  local ok, err = common.ensure_dir(parent)
-  if not ok then
-    return nil, err
-  end
   return common.write_file(path, json.encode(ir))
 end
 
@@ -115,6 +111,14 @@ local function _result_for_error(mutation, message, duration)
     error = tostring(message or "mutation infrastructure error"),
     duration = duration or 0,
   }
+end
+
+-- 空输出（如 exit 127 但无 stderr）时回退到可读的默认错误信息。
+local function _error_message(text, fallback)
+  if text == nil or text == "" then
+    return fallback
+  end
+  return text
 end
 
 local function _prepare_one(base_ir, mutation, options)
@@ -168,7 +172,11 @@ local function _result_from_lane(prepared, lane_result)
   local output = lane_result.output or ""
   local duration = os.clock() - prepared.started_at
   if runner.is_infrastructure_error(lane_result.exit_code, output) then
-    return _result_for_error(prepared.mutation, output, duration)
+    return _result_for_error(
+      prepared.mutation,
+      _error_message(output, "busted infrastructure error (exit " .. tostring(lane_result.exit_code) .. ")"),
+      duration
+    )
   end
   return {
     mutation = prepared.mutation,
@@ -187,19 +195,29 @@ local function _run_parallel_batch(prepared_batch)
       cmd = _busted_lane_cmd(prepared.generated_path, prepared.feature_json),
     }
   end
-  local _, lane_results = parallel_lanes.run(lanes, { stream = false })
+  -- parallel_lanes.run 在 launcher 写盘/启动失败时会 error()，与
+  -- _run_parallel_runner_workers 一样兜底成 error 结果而不是让整个 run 崩掉。
+  local run_ok, run_err, lane_results = pcall(parallel_lanes.run, lanes, { stream = false })
   local results = {}
+  if not run_ok then
+    for index, prepared in ipairs(prepared_batch) do
+      results[index] = _result_for_error(prepared.mutation, run_err, os.clock() - prepared.started_at)
+    end
+    return results
+  end
   for index, prepared in ipairs(prepared_batch) do
     results[index] = _result_from_lane(prepared, lane_results[index])
   end
   return results
 end
 
+local _TIMEOUT_MESSAGE = "mutation run timed out"
+
 local function _run_sequential(base_ir, mutations, options, timed_out)
   local results = {}
   for _, mutation in ipairs(mutations) do
     if timed_out() then
-      results[#results + 1] = _result_for_error(mutation, "mutation run timed out", 0)
+      results[#results + 1] = _result_for_error(mutation, _TIMEOUT_MESSAGE, 0)
     else
       results[#results + 1] = _run_one(base_ir, mutation, options)
     end
@@ -228,7 +246,7 @@ local function _run_parallel(base_ir, mutations, options, timed_out)
 
   for _, mutation in ipairs(mutations) do
     if timed_out() then
-      append_error(mutation, "mutation run timed out")
+      append_error(mutation, _TIMEOUT_MESSAGE)
     else
       local feature_json, prep_err = _prepare_one(base_ir, mutation, options)
       if feature_json == nil then
@@ -250,27 +268,24 @@ local function _run_parallel(base_ir, mutations, options, timed_out)
   return results
 end
 
+local _OUTCOME_STATUS = { test_failure = "killed", test_success = "survived" }
+
 local function _job_response_to_result(mutation, response)
-  local outcome = response and response.outcome or "infrastructure_error"
-  if outcome == "test_failure" then
+  local status = response and _OUTCOME_STATUS[response.outcome]
+  if status ~= nil then
     return {
       mutation = mutation,
-      status = "killed",
+      status = status,
       output = response.output or "",
       error = "",
       duration = response.duration or 0,
     }
   end
-  if outcome == "test_success" then
-    return {
-      mutation = mutation,
-      status = "survived",
-      output = response.output or "",
-      error = "",
-      duration = response.duration or 0,
-    }
-  end
-  return _result_for_error(mutation, response and response.error or "runner worker protocol error", response and response.duration or 0)
+  return _result_for_error(
+    mutation,
+    _error_message(response and response.error, "runner worker protocol error"),
+    response and response.duration or 0
+  )
 end
 
 local function _sort_results_by_mutation_id(results)
@@ -284,7 +299,8 @@ end
 local function _append_worker_output_results(output, mutation_by_id, seen, results)
   for line in (output or ""):gmatch("([^\n]+)") do
     local decoded_ok, response = pcall(json.decode, line)
-    if decoded_ok and response.id ~= nil and mutation_by_id[response.id] ~= nil then
+    -- response 可能是 JSON 标量（如对裸数字行解码成功），索引前先确认是 table。
+    if decoded_ok and type(response) == "table" and response.id ~= nil and mutation_by_id[response.id] ~= nil then
       seen[response.id] = true
       results[#results + 1] = _job_response_to_result(mutation_by_id[response.id], response)
     end
@@ -324,8 +340,9 @@ local function _run_single_runner_worker(input_path, jobs, mutation_by_id, optio
     stdin_path = input_path,
   })
   if not run.ok then
+    local message = _error_message(run.output, "runner worker exited with code " .. tostring(run.exit_code))
     for _, mutation in pairs(mutation_by_id) do
-      results[#results + 1] = _result_for_error(mutation, run.output, 0)
+      results[#results + 1] = _result_for_error(mutation, message, 0)
     end
     return
   end
@@ -349,6 +366,9 @@ local function _run_parallel_runner_workers(jobs, mutation_by_id, options, resul
     lane_mutation_ids[worker_index][#lane_mutation_ids[worker_index] + 1] = job.id
   end
 
+  -- seen 从写盘阶段就开始跟踪：输入文件写失败的 mutation 已登记 error，
+  -- 后面的 missing/lane-failure 兜底不得对同一 mutation 重复计数。
+  local seen = {}
   local lanes = {}
   for worker_index, chunk in ipairs(chunks) do
     local input_path = common.join_path(options.work_dir, "runner-worker-input-" .. tostring(worker_index) .. ".jsonl")
@@ -360,6 +380,7 @@ local function _run_parallel_runner_workers(jobs, mutation_by_id, options, resul
     if not ok then
       for _, id in ipairs(lane_mutation_ids[worker_index]) do
         results[#results + 1] = _result_for_error(mutation_by_id[id], err, 0)
+        seen[id] = true
       end
     else
       lanes[#lanes + 1] = {
@@ -380,16 +401,18 @@ local function _run_parallel_runner_workers(jobs, mutation_by_id, options, resul
   })
   if not ok then
     for _, job in ipairs(jobs) do
-      results[#results + 1] = _result_for_error(mutation_by_id[job.id], worker_error, 0)
+      if not seen[job.id] then
+        results[#results + 1] = _result_for_error(mutation_by_id[job.id], worker_error, 0)
+        seen[job.id] = true
+      end
     end
     return
   end
 
-  local seen = {}
   for lane_index, lane in ipairs(lanes) do
     local lane_result = lane_results[lane_index]
     if lane_result == nil or not lane_result.ok then
-      local output = lane_result and lane_result.output or "runner worker failed"
+      local output = _error_message(lane_result and lane_result.output, "runner worker failed")
       for _, id in ipairs(lane_mutation_ids[lane.worker_index]) do
         results[#results + 1] = _result_for_error(mutation_by_id[id], output, 0)
         seen[id] = true
@@ -408,7 +431,7 @@ local function _run_runner_worker(base_ir, mutations, options, timed_out)
 
   for _, mutation in ipairs(mutations) do
     if timed_out() then
-      results[#results + 1] = _result_for_error(mutation, "mutation run timed out", 0)
+      results[#results + 1] = _result_for_error(mutation, _TIMEOUT_MESSAGE, 0)
     else
       local feature_json, prep_err = _prepare_one(base_ir, mutation, options)
       if feature_json == nil then
@@ -450,15 +473,7 @@ local function _summary(results)
     survived = 0,
     errors = 0,
   }
-  for _, result in ipairs(results) do
-    if result.status == "killed" then
-      summary.killed = summary.killed + 1
-    elseif result.status == "survived" then
-      summary.survived = summary.survived + 1
-    elseif result.status == "error" then
-      summary.errors = summary.errors + 1
-    end
-  end
+  _add_results(summary, results)
   return summary
 end
 
@@ -545,14 +560,28 @@ function mutator.run(options)
   local skipped_mutations = 0
   local new_entries = {}
 
+  -- 预分桶，避免每个场景都全量扫描一遍 mutations（O(场景数×变异数)）。
+  local mutations_by_scenario = {}
+  for _, mutation in ipairs(mutations) do
+    local bucket = mutations_by_scenario[mutation.scenario_index]
+    if bucket == nil then
+      bucket = {}
+      mutations_by_scenario[mutation.scenario_index] = bucket
+    end
+    bucket[#bucket + 1] = mutation
+  end
+
+  -- 循环不变量：超时判定与执行策略在循环外只算一次。
+  local function _timed_out()
+    return options.timeout_seconds ~= nil
+      and os.difftime(os.time(), started_at) >= options.timeout_seconds
+  end
+  local execute = options.runner_worker and _run_runner_worker
+    or (options.workers <= 1 and _run_sequential or _run_parallel)
+
   for scenario_lua_index, scenario in ipairs(base_ir.scenarios) do
     local scenario_index = scenario_lua_index - 1
-    local scenario_mutations = {}
-    for _, mutation in ipairs(mutations) do
-      if mutation.scenario_index == scenario_lua_index then
-        scenario_mutations[#scenario_mutations + 1] = mutation
-      end
-    end
+    local scenario_mutations = mutations_by_scenario[scenario_lua_index] or {}
 
     local should_skip = scenario_manifest.decide_scenario_skip(
       existing_manifest, scenario, scenario_index, current_state, options.level
@@ -568,12 +597,6 @@ function mutator.run(options)
         existing_manifest, scenario_index
       )
     else
-      local function _timed_out()
-        return options.timeout_seconds ~= nil
-          and os.difftime(os.time(), started_at) >= options.timeout_seconds
-      end
-      local execute = options.runner_worker and _run_runner_worker
-        or (options.workers <= 1 and _run_sequential or _run_parallel)
       emit_status(progress, #scenario_mutations, false)
       local scenario_results = execute(base_ir, scenario_mutations, options, _timed_out)
       for _, result in ipairs(scenario_results) do

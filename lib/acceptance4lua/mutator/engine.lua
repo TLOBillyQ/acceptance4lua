@@ -247,6 +247,8 @@ end
 function engine.build_mutations(ir, opts)
   local skip_columns = (opts or {}).skip_columns
   local mutations = {}
+  -- 整个 IR 的 source_path 固定，不必每个单元格重查一次。
+  local source_path = source.path_from_ir(ir)
   for scenario_index, scenario in ipairs(ir.scenarios or {}) do
     for example_index, example in ipairs(scenario.examples or {}) do
       for _, key in ipairs(table_shape.sorted_keys(example)) do
@@ -268,7 +270,7 @@ function engine.build_mutations(ir, opts)
             path = path,
             description = path .. ": " .. original .. " -> " .. mutated,
             display_description = source.mutation_description(ir, scenario, key, original, mutated),
-            source_path = source.path_from_ir(ir),
+            source_path = source_path,
             source_line = source.field_line(ir, scenario, key),
             source_field = source.field_name(ir, key),
             original = original,

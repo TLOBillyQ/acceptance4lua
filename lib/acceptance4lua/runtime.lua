@@ -39,7 +39,7 @@ local function _run_step(ir, world, example, step, handlers)
 
   local ok, success, err = pcall(handler, world, example, step, resolved_text)
   if not ok then
-    return nil, success
+    return nil, source.step_error(ir, step, "step errored: " .. tostring(success))
   end
   if success == false or err ~= nil then
     return nil, err or "step failed: " .. tostring(step.text)

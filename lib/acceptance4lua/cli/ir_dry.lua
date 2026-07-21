@@ -15,6 +15,7 @@ function M.main(args)
     if value == "--include-exact" then
       opts.include_exact = true
     elseif value:match("^%-%-") then
+      io.stderr:write("unknown option: " .. value .. "\n")
       io.stderr:write(M.usage() .. "\n")
       return 2
     else

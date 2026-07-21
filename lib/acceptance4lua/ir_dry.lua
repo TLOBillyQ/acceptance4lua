@@ -100,11 +100,13 @@ local function _normalize_placeholders(text)
   local slots = {}
   local next_slot = 0
   return (text:gsub("<([^<>]*)>", function(name)
-    if slots[name] == nil then
+    local slot = slots[name]
+    if slot == nil then
       next_slot = next_slot + 1
-      slots[name] = next_slot
+      slot = next_slot
+      slots[name] = slot
     end
-    return "<_" .. slots[name] .. ">"
+    return "<_" .. slot .. ">"
   end))
 end
 
@@ -180,13 +182,12 @@ local function _tokenize(text)
   end
 
   for _, codepoint in utf8.codes(stripped) do
-    local char = utf8.char(codepoint)
     if _is_ascii_alnum(codepoint) then
       flush_han()
-      ascii_run[#ascii_run + 1] = char
+      ascii_run[#ascii_run + 1] = string.char(codepoint)
     elseif _is_han(codepoint) then
       flush_ascii()
-      han_run[#han_run + 1] = char
+      han_run[#han_run + 1] = utf8.char(codepoint)
     else
       flush_ascii()
       flush_han()
@@ -302,30 +303,24 @@ end
 --- 一个 background / scenario 内部的重复文本。
 local function _duplicate_in_scenario(occurrences)
   local findings = {}
-  local containers = {}
+  local by_container = {}
   local container_order = {}
 
   for _, occurrence in ipairs(occurrences) do
-    local container = containers[occurrence.container]
-    if container == nil then
-      container = { locations = {}, order = {} }
-      containers[occurrence.container] = container
+    local bucket = by_container[occurrence.container]
+    if bucket == nil then
+      bucket = {}
+      by_container[occurrence.container] = bucket
       container_order[#container_order + 1] = occurrence.container
     end
-    if container.locations[occurrence.text] == nil then
-      container.locations[occurrence.text] = {}
-      container.order[#container.order + 1] = occurrence.text
-    end
-    local bucket = container.locations[occurrence.text]
-    bucket[#bucket + 1] = occurrence.location
+    bucket[#bucket + 1] = occurrence
   end
 
   for _, container_key in ipairs(container_order) do
-    local container = containers[container_key]
-    for _, text in ipairs(container.order) do
-      local locations = container.locations[text]
-      if #locations > 1 then
-        findings[#findings + 1] = _finding("duplicate-in-scenario", { _member(text, locations) })
+    local locations, order = _locations_by_text(by_container[container_key])
+    for _, text in ipairs(order) do
+      if #locations[text] > 1 then
+        findings[#findings + 1] = _finding("duplicate-in-scenario", { _member(text, locations[text]) })
       end
     end
   end
@@ -344,18 +339,18 @@ local function _exact_duplicates(locations, order)
   return findings
 end
 
---- 占位符换成通用槽位后完全相同的不同文本。
-local function _placeholder_variants(locations, order)
+--- 占位符换成通用槽位后完全相同的不同文本。normalized 由 analyze 统一预计算。
+local function _placeholder_variants(locations, order, normalized)
   local groups = {}
   local group_order = {}
 
   for _, text in ipairs(order) do
-    local normalized = _normalize_placeholders(text)
-    if groups[normalized] == nil then
-      groups[normalized] = {}
-      group_order[#group_order + 1] = normalized
+    local key = normalized[text]
+    if groups[key] == nil then
+      groups[key] = {}
+      group_order[#group_order + 1] = key
     end
-    local group = groups[normalized]
+    local group = groups[key]
     group[#group + 1] = text
   end
 
@@ -375,12 +370,11 @@ local function _placeholder_variants(locations, order)
 end
 
 --- 相似度成对比较。已经构成 placeholder-variant 的文本对(归一后相同)不再重复报。
-local function _similarity_findings(locations, order)
+--- normalized 与 _placeholder_variants 共用,由 analyze 统一预计算。
+local function _similarity_findings(locations, order, normalized)
   local tokens = {}
-  local normalized = {}
   for _, text in ipairs(order) do
     tokens[text] = _tokenize(text)
-    normalized[text] = _normalize_placeholders(text)
   end
 
   local findings = {}
@@ -417,6 +411,12 @@ function ir_dry.analyze(ir, opts)
   local occurrences = _collect_occurrences(ir)
   local locations, order = _locations_by_text(occurrences)
 
+  -- 归一文本只算一次,placeholder-variant 与相似度两处共用。
+  local normalized = {}
+  for _, text in ipairs(order) do
+    normalized[text] = _normalize_placeholders(text)
+  end
+
   local findings = {}
   local function absorb(batch)
     for _, finding in ipairs(batch) do
@@ -428,12 +428,20 @@ function ir_dry.analyze(ir, opts)
   if opts.include_exact then
     absorb(_exact_duplicates(locations, order))
   end
-  absorb(_placeholder_variants(locations, order))
-  absorb(_similarity_findings(locations, order))
+  absorb(_placeholder_variants(locations, order, normalized))
+  absorb(_similarity_findings(locations, order, normalized))
 
-  table.sort(findings, function(left, right)
-    return _sort_key(left) < _sort_key(right)
+  -- 排序键只算一次:_sort_key 内部有 table.sort 与字符串拼接,不宜放进比较函数。
+  local decorated = {}
+  for index, finding in ipairs(findings) do
+    decorated[index] = { sort_key = _sort_key(finding), finding = finding }
+  end
+  table.sort(decorated, function(left, right)
+    return left.sort_key < right.sort_key
   end)
+  for index, entry in ipairs(decorated) do
+    findings[index] = entry.finding
+  end
 
   return {
     schema_version = 1,
@@ -464,19 +472,30 @@ function ir_dry.write_report_file(ir_path, report_path, opts)
     return nil, read_err
   end
 
-  local ok, ir = pcall(json.decode, text)
-  if not ok then
+  local decoded, ir = pcall(json.decode, text)
+  if not decoded then
     return nil, "cannot decode IR: " .. tostring(ir)
   end
+  -- json.decode 可能解出数字/字符串等标量;nil("null")仍按空 IR 容忍。
+  if ir ~= nil and type(ir) ~= "table" then
+    return nil, "cannot decode IR: root is not a JSON object"
+  end
 
-  local report = ir_dry.analyze(ir, opts)
+  -- analyze 对畸形 IR(如非法 UTF-8 step 文本)会抛错,转成干净的错误返回。
+  local analyzed, report = pcall(ir_dry.analyze, ir, opts)
+  if not analyzed then
+    return nil, "cannot analyze IR: " .. tostring(report)
+  end
 
   local handle, open_err = io.open(report_path, "w")
   if handle == nil then
     return nil, "cannot write report: " .. tostring(open_err)
   end
-  handle:write(json.encode(report))
+  local written, write_err = handle:write(json.encode(report))
   handle:close()
+  if written == nil then
+    return nil, "cannot write report: " .. tostring(write_err)
+  end
   return true
 end
 

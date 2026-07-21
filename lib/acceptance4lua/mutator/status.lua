@@ -23,20 +23,24 @@ function status.snapshot(total, summary, running, elapsed_label)
   }
 end
 
+local _NUMERIC_FIELDS = {
+  "total",
+  "completed",
+  "running",
+  "killed",
+  "survived",
+  "errors",
+  "skipped_scenarios",
+  "skipped_mutations",
+}
+
 function status.format_line(snapshot)
   snapshot = snapshot or {}
-  return table.concat({
-    "status",
-    "elapsed=" .. tostring(snapshot.elapsed or ""),
-    "total=" .. tostring(_number(snapshot.total)),
-    "completed=" .. tostring(_number(snapshot.completed)),
-    "running=" .. tostring(_number(snapshot.running)),
-    "killed=" .. tostring(_number(snapshot.killed)),
-    "survived=" .. tostring(_number(snapshot.survived)),
-    "errors=" .. tostring(_number(snapshot.errors)),
-    "skipped_scenarios=" .. tostring(_number(snapshot.skipped_scenarios)),
-    "skipped_mutations=" .. tostring(_number(snapshot.skipped_mutations)),
-  }, " ")
+  local parts = { "status", "elapsed=" .. tostring(snapshot.elapsed or "") }
+  for _, field in ipairs(_NUMERIC_FIELDS) do
+    parts[#parts + 1] = field .. "=" .. tostring(_number(snapshot[field]))
+  end
+  return table.concat(parts, " ")
 end
 
 return status

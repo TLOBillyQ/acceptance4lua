@@ -27,10 +27,10 @@ local function _pad(message)
   return padded .. string.rep("\0", zero_count) .. string.pack(">I8", bit_length)
 end
 
-local function _compress(state, block)
+local function _compress(state, padded, offset)
   local words = {}
   for index = 1, 16 do
-    words[index] = string.unpack(">I4", block, (index - 1) * 4 + 1)
+    words[index] = string.unpack(">I4", padded, offset + (index - 1) * 4)
   end
   for index = 17, 64 do
     local prior = words[index - 15]
@@ -77,7 +77,7 @@ function spec_hash.sha256(message)
   }
   local padded = _pad(tostring(message or ""))
   for offset = 1, #padded, 64 do
-    _compress(state, padded:sub(offset, offset + 63))
+    _compress(state, padded, offset)
   end
   return string.format(
     "%08x%08x%08x%08x%08x%08x%08x%08x",
@@ -137,9 +137,11 @@ function spec_hash.compute_generated_files_hash(generated_files, project_root)
   table.sort(files)
 
   for _, relative_path in ipairs(files) do
-    local absolute_path = common.normalize_path(root .. "/" .. relative_path)
+    local absolute_path
     if common.is_absolute_path(relative_path) then
       absolute_path = common.normalize_path(relative_path)
+    else
+      absolute_path = common.normalize_path(root .. "/" .. relative_path)
     end
     local content, err = common.read_file(absolute_path)
     local file_hash

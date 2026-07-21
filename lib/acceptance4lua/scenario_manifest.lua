@@ -34,7 +34,8 @@ function scenario_manifest.read(feature_source)
     return nil
   end
   local json_lines = {}
-  for line in block:gmatch("[^\n]*") do
+  -- 用 + 而非 *：避免每个换行与串尾各多迭代出一个空行（其 payload 也是空串，纯属冗余）。
+  for line in block:gmatch("[^\n]+") do
     local payload = line:match("^%s*#%s?(.*)$")
     if payload ~= nil then
       json_lines[#json_lines + 1] = payload

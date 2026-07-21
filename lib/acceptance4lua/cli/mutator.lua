@@ -54,7 +54,26 @@ local function _parse_duration(value)
   return seconds
 end
 
+-- 纯字符串选项:选项名 → options 字段名。
+local _STRING_OPTIONS = {
+  ["--feature"] = "feature",
+  ["--work-dir"] = "work_dir",
+  ["--generated-dir"] = "generated_dir",
+  ["--runner-worker"] = "runner_worker",
+  ["--implementation-hash"] = "implementation_hash",
+}
+
+-- 取紧跟选项名之后的值;缺失时返回 nil + 错误。
+local function _require_value(args, index, name)
+  local value = args[index + 1]
+  if value == nil then
+    return nil, "missing value for " .. name
+  end
+  return value
+end
+
 function M.parse_args(args)
+  args = args or {}
   local options = {
     feature = "features/a-feature.feature",
     work_dir = "build/acceptance-mutation",
@@ -65,51 +84,63 @@ function M.parse_args(args)
   }
 
   local index = 1
-  while index <= #(args or {}) do
+  while index <= #args do
     local value = args[index]
-    if value == "--feature" then
-      options.feature = args[index + 1]
-      index = index + 2
-    elseif value == "--work-dir" then
-      options.work_dir = args[index + 1]
-      index = index + 2
-    elseif value == "--generated-dir" then
-      options.generated_dir = args[index + 1]
+    local string_key = _STRING_OPTIONS[value]
+    if string_key ~= nil then
+      local option_value, value_err = _require_value(args, index, value)
+      if option_value == nil then
+        return nil, value_err
+      end
+      options[string_key] = option_value
       index = index + 2
     elseif value == "--workers" then
-      options.workers = tonumber(args[index + 1])
+      local raw, value_err = _require_value(args, index, value)
+      if raw == nil then
+        return nil, value_err
+      end
+      local workers = tonumber(raw)
+      if workers == nil then
+        return nil, "invalid workers: " .. tostring(raw)
+      end
+      options.workers = workers
       index = index + 2
     elseif value == "--timeout" then
-      options.timeout_seconds = _parse_duration(args[index + 1])
+      local raw, value_err = _require_value(args, index, value)
+      if raw == nil then
+        return nil, value_err
+      end
+      options.timeout_seconds = _parse_duration(raw)
       if options.timeout_seconds == nil then
-        return nil, "invalid timeout: " .. tostring(args[index + 1])
+        return nil, "invalid timeout: " .. tostring(raw)
       end
       index = index + 2
     elseif value == "--status-interval" then
-      options.status_interval_seconds = _parse_duration(args[index + 1])
+      local raw, value_err = _require_value(args, index, value)
+      if raw == nil then
+        return nil, value_err
+      end
+      options.status_interval_seconds = _parse_duration(raw)
       if options.status_interval_seconds == nil then
-        return nil, "invalid status interval: " .. tostring(args[index + 1])
+        return nil, "invalid status interval: " .. tostring(raw)
       end
       index = index + 2
     elseif value == "--level" then
-      local level = args[index + 1]
-      if level == nil or not _VALID_LEVELS[level] then
+      local level, value_err = _require_value(args, index, value)
+      if level == nil then
+        return nil, value_err
+      end
+      if not _VALID_LEVELS[level] then
         return nil, "invalid level: " .. tostring(level)
       end
       options.level = level
       index = index + 2
     elseif value == "--skip-columns" then
-      local columns = _parse_column_set(args[index + 1])
-      if columns == nil then
-        return nil, "missing --skip-columns value"
+      local raw, value_err = _require_value(args, index, value)
+      if raw == nil then
+        return nil, value_err
       end
-      options.skip_columns = columns
-      index = index + 2
-    elseif value == "--runner-worker" then
-      options.runner_worker = args[index + 1]
-      index = index + 2
-    elseif value == "--implementation-hash" then
-      options.implementation_hash = args[index + 1]
+      options.skip_columns = _parse_column_set(raw)
       index = index + 2
     elseif value == "--json" then
       options.json = true
@@ -125,9 +156,6 @@ function M.parse_args(args)
     end
   end
 
-  if options.feature == nil or options.work_dir == nil then
-    return nil, "missing option value"
-  end
   if options.help then
     return options
   end

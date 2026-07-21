@@ -2,6 +2,7 @@ local common = require("acceptance4lua.runtime.common")
 local chinese_normalizer = require("acceptance4lua.chinese_normalizer")
 local json = require("acceptance4lua.json")
 local source = require("acceptance4lua.source")
+local spec_hash = require("acceptance4lua.spec_hash")
 
 local gherkin_parser = {}
 
@@ -11,26 +12,29 @@ local _trim = source.trim
 -- 加新关键字（如 But）只需追加一行，不必再插一条 if-keyword==nil 分支。
 local _STEP_KEYWORDS = { "Given", "When", "Then", "And" }
 
+-- 逐行匹配的 pattern 在模块加载时预拼接，避免每个 step 行重复字符串拼接。
+local _STEP_PATTERNS = {}
+for _, keyword in ipairs(_STEP_KEYWORDS) do
+  _STEP_PATTERNS[#_STEP_PATTERNS + 1] = "^(" .. keyword .. ")%s+(.+)$"
+end
+
 local function _strip_mutation_metadata(content)
   local stripped = tostring(content or "")
   stripped = stripped:gsub("# acceptance%-mutation%-manifest%-begin\n.-# acceptance%-mutation%-manifest%-end\n?", "", 1)
-  local replacements
-  stripped, replacements = stripped:gsub("^%s*#%s*mutation%-stamp:[^\n]*\n?", "", 1)
-  if replacements == 0 then
-    stripped = stripped:gsub("\n%s*#%s*mutation%-stamp:[^\n]*\n?", "\n", 1)
-  end
-  return stripped
+  -- stamp 行的剥离逻辑与 spec_hash.strip_first_stamp_line 保持一致（单一实现）。
+  return spec_hash.strip_first_stamp_line(stripped)
 end
 
 local function _step(keyword, text, line_number, source_map)
+  local source_line = source.line_from_map(source_map, line_number)
   return {
     keyword = keyword,
     text = _trim(text),
     parameters = source.extract_parameters(text),
     metadata = {
       source_path = source.path_from_map(source_map),
-      source_line = source.line_from_map(source_map, line_number),
-      original_text = ((source_map or {}).original_step_text_by_line or {})[source.line_from_map(source_map, line_number)],
+      source_line = source_line,
+      original_text = ((source_map or {}).original_step_text_by_line or {})[source_line],
     },
   }
 end
@@ -160,8 +164,8 @@ function gherkin_parser.parse_text(text, opts)
     end
 
     local keyword, step_text
-    for _, candidate in ipairs(_STEP_KEYWORDS) do
-      keyword, step_text = line:match("^(" .. candidate .. ")%s+(.+)$")
+    for _, pattern in ipairs(_STEP_PATTERNS) do
+      keyword, step_text = line:match(pattern)
       if keyword ~= nil then break end
     end
     if keyword == nil then
@@ -181,7 +185,8 @@ function gherkin_parser.parse_text(text, opts)
   end
 
   if feature == nil then
-    return nil, "missing feature declaration"
+    -- 与循环内的同名错误保持一致，带上 source_map 的路径前缀，方便定位文件。
+    return nil, source.error_from_map(source_map, 1, "missing feature declaration")
   end
 
   return feature
@@ -210,12 +215,8 @@ function gherkin_parser.write_json_file(feature_path, output_path)
     return nil, err
   end
 
-  local parent = common.parent_dir(output_path)
+  -- common.write_file 内部已负责创建父目录，无需重复 ensure_dir。
   local ok
-  ok, err = common.ensure_dir(parent)
-  if not ok then
-    return nil, err
-  end
   ok, err = common.write_file(output_path, json.encode(ir))
   if not ok then
     return nil, err

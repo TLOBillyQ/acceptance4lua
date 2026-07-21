@@ -51,6 +51,10 @@ local function _lua_literal(value, indent, key_hint)
   return _wrap_table_body(fields, indent)
 end
 
+local function _require_line(var_name, module_name)
+  return "local " .. var_name .. " = require(" .. string.format("%q", module_name) .. ")"
+end
+
 function generator.generate(ir, opts)
   opts = opts or {}
   local runtime_module = opts.runtime_module or "acceptance4lua.runtime"
@@ -58,9 +62,9 @@ function generator.generate(ir, opts)
   local json_module = opts.json_module or "acceptance4lua.json"
   return table.concat({
     "-- luacheck: globals describe it",
-    'local runtime = require("' .. runtime_module .. '")',
-    'local steps = require("' .. steps_module .. '")',
-    'local json = require("' .. json_module .. '")',
+    _require_line("runtime", runtime_module),
+    _require_line("steps", steps_module),
+    _require_line("json", json_module),
     "",
     "local embedded_ir = " .. _lua_literal(ir, 0),
     "",
@@ -112,13 +116,9 @@ local function _write_metadata(ir, output_path, opts)
 end
 
 function generator.write_generated(ir, output_path, opts)
-  local parent = common.parent_dir(output_path)
-  local ok, err = common.ensure_dir(parent)
-  if not ok then
-    return nil, err
-  end
+  -- common.write_file 内部已 ensure_dir,此处不再重复建目录。
   local generated = generator.generate(ir, opts)
-  ok, err = common.write_file(output_path, generated)
+  local ok, err = common.write_file(output_path, generated)
   if not ok then
     return nil, err
   end
@@ -133,7 +133,7 @@ function generator.generate_file(json_path, output_path)
 
   local ok, ir_or_err = pcall(json.decode, content)
   if not ok then
-    return nil, ir_or_err
+    return nil, "cannot decode IR JSON " .. tostring(json_path) .. ": " .. tostring(ir_or_err)
   end
   return generator.write_generated(ir_or_err, output_path, { ir_path = json_path })
 end
