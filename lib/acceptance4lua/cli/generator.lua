@@ -43,7 +43,10 @@ function M.main(args)
   return 0
 end
 
-if arg ~= nil and tostring(arg[0] or ""):match("generator%.lua$") then
+-- 仅当本文件就是主脚本时才自动运行:宿主 wrapper 若也叫 generator.lua,
+-- require 本模块时 arg[0] 指向宿主文件,抢跑会绕过 wrapper 的参数加工。
+local _self_path = (debug.getinfo(1, "S").source or ""):gsub("^@", ""):gsub("\\", "/")
+if arg ~= nil and tostring(arg[0] or ""):gsub("\\", "/") == _self_path then
   os.exit(M.main(arg))
 end
 
