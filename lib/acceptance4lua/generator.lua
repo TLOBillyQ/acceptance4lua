@@ -58,7 +58,8 @@ end
 function generator.generate(ir, opts)
   opts = opts or {}
   local runtime_module = opts.runtime_module or "acceptance4lua.runtime"
-  local steps_module = opts.steps_module or "acceptance.steps"
+  -- step 模块默认用中性名 "steps"；宿主通过 opts.steps_module 覆盖为自己的命名空间。
+  local steps_module = opts.steps_module or "steps"
   local json_module = opts.json_module or "acceptance4lua.json"
   local harness_module = opts.harness_module or "acceptance4lua.harness"
   return table.concat({
@@ -129,7 +130,8 @@ function generator.write_generated(ir, output_path, opts)
   return _write_metadata(ir, output_path, opts)
 end
 
-function generator.generate_file(json_path, output_path)
+function generator.generate_file(json_path, output_path, opts)
+  opts = opts or {}
   local content, err = common.read_file(json_path)
   if content == nil then
     return nil, err
@@ -139,7 +141,8 @@ function generator.generate_file(json_path, output_path)
   if not ok then
     return nil, "cannot decode IR JSON " .. tostring(json_path) .. ": " .. tostring(ir_or_err)
   end
-  return generator.write_generated(ir_or_err, output_path, { ir_path = json_path })
+  opts.ir_path = opts.ir_path or json_path
+  return generator.write_generated(ir_or_err, output_path, opts)
 end
 
 return generator

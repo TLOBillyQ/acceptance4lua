@@ -113,6 +113,28 @@ describe("acceptance4lua", function()
     assert.is_truthy(normalized.text:find("Scenario: 普通场景", 1, true))
   end)
 
+  it("makes the mandatory language-marker directories configurable", function()
+    local english = "Feature: plain\nScenario: s\n  Given x\n"
+
+    -- 默认规则：features/ 下必须声明语言；其他目录不要求。
+    local rejected, err = normalizer.normalize_text(english, { path = "features/a.feature" })
+    assert.is_nil(rejected)
+    assert.is_truthy(tostring(err):find("# language: zh-CN", 1, true))
+    assert.is_truthy(normalizer.normalize_text(english, { path = "specs/a.feature" }))
+
+    -- 宿主可换用自己的目录名；空表则完全关闭该规则。
+    local custom, custom_err = normalizer.normalize_text(english, {
+      path = "specs/a.feature",
+      mandatory_language_dirs = { "specs" },
+    })
+    assert.is_nil(custom)
+    assert.is_truthy(tostring(custom_err):find("specs/", 1, true))
+    assert.is_truthy(normalizer.normalize_text(english, {
+      path = "features/a.feature",
+      mandatory_language_dirs = {},
+    }))
+  end)
+
   it("generates deterministic standalone entrypoints using framework modules by default", function()
     local ir = assert(parser.parse_text(_feature()))
     local first = generator.generate(ir)
@@ -121,25 +143,33 @@ describe("acceptance4lua", function()
     assert.are.equal(first, second)
     assert.is_truthy(first:find('require("acceptance4lua.harness")', 1, true))
     assert.is_truthy(first:find('require("acceptance4lua.runtime")', 1, true))
-    assert.is_truthy(first:find('require("acceptance.steps")', 1, true))
+    assert.is_truthy(first:find('require("steps")', 1, true))
     assert.is_truthy(first:find('require("acceptance4lua.json")', 1, true))
     assert.is_truthy(first:find('ACCEPTANCE_FEATURE_JSON', 1, true))
     assert.is_truthy(first:find('runtime.define_specs(ir, steps.handlers(), it)', 1, true))
     assert.is_truthy(first:find('os.exit(harness.run() and 0 or 1)', 1, true))
   end)
 
+  it("lets the host override the generated step module name", function()
+    local ir = assert(parser.parse_text(_feature()))
+    local generated = generator.generate(ir, { steps_module = "eggy.steps" })
+
+    assert.is_truthy(generated:find('require("eggy.steps")', 1, true))
+    assert.is_nil(generated:find('require("steps")', 1, true))
+  end)
+
   it("runs a generated entrypoint through the lua launcher end to end", function()
     local ir = assert(parser.parse_text(_feature()))
     local tmp_root = common.make_temp_path("acceptance4lua_runner_e2e_", "")
     common.remove_path(tmp_root)
-    assert(common.ensure_dir(tmp_root .. "/acceptance"))
+    assert(common.ensure_dir(tmp_root))
 
     local generated_path = tmp_root .. "/generated_spec.lua"
     assert(common.write_file(generated_path, generator.generate(ir)))
 
-    -- 宿主提供的 step handlers：生成的入口默认 require("acceptance.steps")。
+    -- 宿主提供的 step handlers：生成的入口默认 require("steps")。
     local function _write_steps(handlers_body)
-      assert(common.write_file(tmp_root .. "/acceptance/steps.lua", table.concat({
+      assert(common.write_file(tmp_root .. "/steps.lua", table.concat({
         "return {",
         "  handlers = function()",
         "    return {",
@@ -258,6 +288,7 @@ describe("acceptance4lua", function()
 
   it("parses --skip-columns into an exact-match column set", function()
     local options = assert(cli_mutator.parse_args({
+      "--feature", "features/x.feature",
       "--runner-worker", "true",
       "--skip-columns", "角色ID, 观察角色ID ,,",
     }))
@@ -268,8 +299,31 @@ describe("acceptance4lua", function()
     assert.is_nil(missing)
     assert.is_truthy(err)
 
-    local without = assert(cli_mutator.parse_args({ "--runner-worker", "true" }))
+    local without = assert(cli_mutator.parse_args({
+      "--feature", "features/x.feature",
+      "--runner-worker", "true",
+    }))
     assert.is_nil(without.skip_columns)
+  end)
+
+  it("requires --feature instead of defaulting to a placeholder path", function()
+    local options, err = cli_mutator.parse_args({ "--runner-worker", "true" })
+    assert.is_nil(options)
+    assert.is_truthy(err)
+
+    local parsed = assert(cli_mutator.parse_args({
+      "--feature", "specs/order.feature",
+      "--runner-worker", "true",
+      "--steps-module", "eggy.steps",
+    }))
+    assert.are.equal("specs/order.feature", parsed.feature)
+    assert.are.equal("eggy.steps", parsed.steps_module)
+  end)
+
+  it("requires opts.feature in mutator.run", function()
+    local result, err = mutator.run({ level = "hard" })
+    assert.is_nil(result)
+    assert.are.equal("feature is required", err)
   end)
 
   it("does not rewrite a feature when differential mutation skips every scenario", function()

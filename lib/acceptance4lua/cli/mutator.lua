@@ -5,9 +5,10 @@ local M = {}
 function M.usage()
   return table.concat({
     "usage: gherkin-mutator [options]",
-    "  --feature <path>   default: features/a-feature.feature",
+    "  --feature <path>   (required)",
     "  --work-dir <path>  default: build/acceptance-mutation",
     "  --generated-dir <path>  default: <work-dir>/generated",
+    "  --steps-module <name>  step module required by generated entrypoints (default: steps)",
     "  --workers <count>",
     "  --timeout <duration>",
     "  --status-interval <duration>  default: 30s; 0 disables status lines",
@@ -59,6 +60,7 @@ local _STRING_OPTIONS = {
   ["--feature"] = "feature",
   ["--work-dir"] = "work_dir",
   ["--generated-dir"] = "generated_dir",
+  ["--steps-module"] = "steps_module",
   ["--runner-worker"] = "runner_worker",
   ["--implementation-hash"] = "implementation_hash",
 }
@@ -75,7 +77,6 @@ end
 function M.parse_args(args)
   args = args or {}
   local options = {
-    feature = "features/a-feature.feature",
     work_dir = "build/acceptance-mutation",
     workers = 1,
     status_interval_seconds = 30,
@@ -158,6 +159,9 @@ function M.parse_args(args)
 
   if options.help then
     return options
+  end
+  if options.feature == nil then
+    return nil, "--feature is required"
   end
   if options.generated_dir == nil then
     options.generated_dir = options.work_dir .. "/generated"

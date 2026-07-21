@@ -16,8 +16,9 @@ It provides:
   generated-file implementation hashes, runner-worker integration, and status
   reporting.
 
-Project-specific code remains outside this package. Hosts should provide step
-handlers, runner adapters, command wrappers, and any application fixtures.
+Project-specific code remains outside this package. Hosts provide step
+handlers, runner adapters, command wrappers, and any application fixtures; see
+"Adopting In A New Project" below.
 
 ## Layout
 
@@ -32,18 +33,20 @@ lib/acceptance4lua/
 ## Generated Specs
 
 Generated entrypoints are standalone Lua scripts. They default to the portable
-framework modules and the host-provided step namespace:
+framework modules and a neutral host step module name:
 
 ```lua
 require("acceptance4lua.harness")
 require("acceptance4lua.runtime")
-require("acceptance.steps")
+require("steps")
 require("acceptance4lua.json")
 ```
 
-This lets a host keep project step handlers under `acceptance.steps` while the
-portable framework lives directly under `acceptance4lua.*`. The generator also
-accepts module-name overrides for hosts with different namespaces.
+The generator accepts module-name overrides for hosts with different
+namespaces: pass `steps_module` (and optionally `runtime_module`,
+`json_module`, `harness_module`) via `generator.generate(ir, opts)` /
+`generator.generate_file(json, out, opts)`, or `--steps-module <name>` on the
+`acceptance-entrypoint-generator` CLI.
 
 Run a generated entrypoint with any Lua interpreter; `LUA_PATH` must cover the
 framework and host modules (the runner sets it for you, and honors the
@@ -52,6 +55,43 @@ framework and host modules (the runner sets it for you, and honors the
 ```sh
 LUA_PATH='lib/?.lua;lib/?/init.lua;;' lua path/to/generated_spec.lua
 ```
+
+## Adopting In A New Project (eggy)
+
+A host project wires the pipeline like this (using a fictional project `eggy`
+as the example):
+
+1. Lay out step handlers as a plain Lua module returning
+   `{ handlers = function() return { ["step text"] = function(world, example) ... end, ... } end }`.
+   The generated entrypoint requires `steps` by default, so `eggy/steps.lua`
+   works out of the box; for a nested namespace such as `eggy.steps`, pass
+   `steps_module = "eggy.steps"` to the generator (and to the mutator, which
+   regenerates entrypoints internally).
+2. Parse and generate:
+   `require("acceptance4lua.gherkin_parser").write_json_file("features/x.feature", "build/x.json")`
+   then
+   `require("acceptance4lua.generator").generate_file("build/x.json", "build/x_spec.lua", { steps_module = "eggy.steps" })`.
+3. Run specs through the runner (`acceptance4lua.runner.run_generated`) or
+   plain `lua`, with `LUA_PATH` covering both `acceptance4lua` and the host
+   step module.
+4. Mutate:
+   `require("acceptance4lua.mutator").run({ feature = "features/x.feature", steps_module = "eggy.steps", ... })`,
+   or the CLI `gherkin-mutator --feature <path> --runner-worker <cmd>
+   [--steps-module <name>]`. `--feature` is required; there is no built-in
+   default path.
+5. Feature files under `features/` must start with `# language: zh-CN`. Hosts
+   keeping features elsewhere can pass
+   `mandatory_language_dirs = { "<dir>" }` to
+   `chinese_normalizer.normalize_text` / `gherkin_parser.parse_file` (empty
+   table disables the rule).
+
+### Compatibility Notes
+
+- The default generated step module changed from `acceptance.steps` to
+  `steps`. Hosts relying on the old implicit default must pass
+  `steps_module = "acceptance.steps"` explicitly.
+- `gherkin-mutator` no longer defaults `--feature` to a placeholder path;
+  the option is now required (any real caller already passed it).
 
 ## Tests
 

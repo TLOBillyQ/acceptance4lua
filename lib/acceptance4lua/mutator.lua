@@ -80,6 +80,7 @@ local function _prepare_generated_entrypoint(base_ir, options)
   local generated_path = _generated_path(options)
   ok, err = generator.write_generated(base_ir, generated_path, {
     ir_path = base_json_path,
+    steps_module = options.steps_module,
   })
   if not ok then
     return nil, err
@@ -481,7 +482,9 @@ local _VALID_LEVELS = { full = true, hard = true, soft = true }
 
 function mutator.run(options)
   options = options or {}
-  options.feature = options.feature or "features/a-feature.feature"
+  if options.feature == nil then
+    return nil, "feature is required"
+  end
   options.work_dir = options.work_dir or "build/acceptance-mutation"
   options.generated_dir = options.generated_dir or common.join_path(options.work_dir, "generated")
   options.workers = math.max(1, tonumber(options.workers or 1) or 1)

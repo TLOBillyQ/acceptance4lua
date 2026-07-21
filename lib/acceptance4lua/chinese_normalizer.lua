@@ -12,9 +12,22 @@ local function _split_lines(text)
   return lines
 end
 
-local function _is_features_path(path)
+-- 默认把 features/ 目录下的业务源文件视为必须声明语言的源文件；
+-- 宿主可用 opts.mandatory_language_dirs 覆盖为自己的目录名列表。
+local _DEFAULT_MANDATORY_LANGUAGE_DIRS = { "features" }
+
+-- 返回 path 命中的强制语言声明目录名，未命中返回 nil。
+local function _matched_mandatory_dir(path, dirs)
   local normalized = tostring(path or ""):gsub("\\", "/")
-  return normalized:find("/features/", 1, true) ~= nil or normalized:match("^features/") ~= nil
+  for _, dir in ipairs(dirs or _DEFAULT_MANDATORY_LANGUAGE_DIRS) do
+    dir = tostring(dir):gsub("/+$", "")
+    if dir ~= ""
+      and (normalized:find("/" .. dir .. "/", 1, true) ~= nil
+        or normalized:sub(1, #dir + 1) == dir .. "/") then
+      return dir
+    end
+  end
+  return nil
 end
 
 local function _english_keyword(line)
@@ -207,8 +220,9 @@ function chinese_normalizer.normalize_text(text, opts)
   local path = opts.path
   local is_chinese = _trim(first_line) == "# language: zh-CN"
 
-  if _is_features_path(path) and not is_chinese then
-    return nil, source.format_error(path, 1, "features/ 下的业务源文件首行必须是 # language: zh-CN")
+  local mandatory_dir = _matched_mandatory_dir(path, opts.mandatory_language_dirs)
+  if mandatory_dir ~= nil and not is_chinese then
+    return nil, source.format_error(path, 1, mandatory_dir .. "/ 下的业务源文件首行必须是 # language: zh-CN")
   end
 
   if not is_chinese then

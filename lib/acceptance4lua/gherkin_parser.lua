@@ -192,7 +192,7 @@ function gherkin_parser.parse_text(text, opts)
   return feature
 end
 
-function gherkin_parser.parse_file(path)
+function gherkin_parser.parse_file(path, opts)
   local content, err = common.read_file(path)
   if content == nil then
     return nil, err
@@ -200,6 +200,7 @@ function gherkin_parser.parse_file(path)
   local normalized
   normalized, err = chinese_normalizer.normalize_text(_strip_mutation_metadata(content), {
     path = path,
+    mandatory_language_dirs = opts and opts.mandatory_language_dirs or nil,
   })
   if normalized == nil then
     return nil, err
@@ -209,8 +210,8 @@ function gherkin_parser.parse_file(path)
   })
 end
 
-function gherkin_parser.write_json_file(feature_path, output_path)
-  local ir, err = gherkin_parser.parse_file(feature_path)
+function gherkin_parser.write_json_file(feature_path, output_path, opts)
+  local ir, err = gherkin_parser.parse_file(feature_path, opts)
   if ir == nil then
     return nil, err
   end
