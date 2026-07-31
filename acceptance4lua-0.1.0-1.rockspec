@@ -3,7 +3,7 @@ package = "acceptance4lua"
 version = "0.1.0-1"
 source = {
    url = "git+http://lzxsvn:3000/qinyuanj/acceptance4lua.git",
-   branch = "main",
+   tag = "v0.1.0",
 }
 description = {
    summary = "Acceptance pipeline framework for Lua",
@@ -20,7 +20,7 @@ dependencies = {
    "lua >= 5.4",
 }
 test_dependencies = {
-   "luaunit >= 3.4",
+   "luaunit == 3.5-1",
 }
 build = {
    type = "builtin",
