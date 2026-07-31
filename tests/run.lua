@@ -1,4 +1,4 @@
--- 测试入口：在仓库根目录执行 `lua spec/run.lua`。
+-- 测试入口：在仓库根目录执行 `lua tests/run.lua`。
 -- 4lua 工具链统一决策（ADR-0005）：本仓库测试套件迁移至 luaunit，
 -- 遵循 test_*.lua + luaunit 约定（与 mutate4lua 已落地形态一致）。
 -- 产品 harness（lib/acceptance4lua/harness.lua）是验收入口生成器的一部分，
@@ -8,18 +8,18 @@ package.path = "lib/?.lua;lib/?/init.lua;" .. package.path
 
 local lu = require("luaunit")
 
-local handle = assert(io.popen("ls -1 spec"))
+local handle = assert(io.popen("ls -1 tests"))
 local files = {}
 for name in handle:lines() do
   if name:match("^test_.*%.lua$") then
-    files[#files + 1] = "spec/" .. name
+    files[#files + 1] = "tests/" .. name
   end
 end
 handle:close()
 table.sort(files)
 
 if #files == 0 then
-  io.stderr:write("no test files found (spec/test_*.lua)\n")
+  io.stderr:write("no test files found (tests/test_*.lua)\n")
   os.exit(1)
 end
 

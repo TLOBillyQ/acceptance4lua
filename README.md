@@ -116,7 +116,7 @@ LUA_PATH='lib/?.lua;lib/?/init.lua;;' lua path/to/generated_spec.lua
 ## 测试 (Tests)
 
 本仓库自身的测试套件运行在 [luaunit](https://github.com/bluebird75/luaunit) 上
-（4lua 工具链统一决策，ADR-0005），遵循 `spec/test_*.lua` + luaunit 约定。
+（4lua 工具链统一决策，ADR-0005），遵循 `tests/test_*.lua` + luaunit 约定。
 注意：`lib/acceptance4lua/harness.lua` 是产品代码（生成的验收入口使用的内嵌
 harness），并非本仓库的测试设施。
 
@@ -129,7 +129,7 @@ luarocks install luaunit
 然后运行：
 
 ```sh
-lua spec/run.lua
+lua tests/run.lua
 ```
 
 ## 与 APS 的关系 (Relationship To APS)
