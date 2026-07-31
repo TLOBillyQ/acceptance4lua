@@ -1,26 +1,23 @@
 # acceptance4lua
 
-`acceptance4lua` is a pure-Lua acceptance pipeline framework modeled after
-`unclebob/Acceptance-Pipeline-Specification`.
+`acceptance4lua` 是一个纯 Lua 验收流水线框架，仿照
+`unclebob/Acceptance-Pipeline-Specification` 实现。
 
-It provides:
+它提供：
 
-- a deterministic Gherkin subset parser;
-- a Chinese `# language: zh-CN` normalizer for the supported keyword set;
-- JSON IR encoding and decoding;
-- a thin standalone acceptance entrypoint generator (self-contained harness,
-  no external test framework needed);
-- a report-only IR-DRY checker with CJK-aware similarity scoring;
-- a runtime that dispatches exact step text to project step handlers;
-- Gherkin example-value mutation with feature stamps, scenario manifests,
-  generated-file implementation hashes, runner-worker integration, and status
-  reporting.
+- 一个确定性的 Gherkin 子集解析器；
+- 面向支持的关键字集合的中文 `# language: zh-CN` 规范化器；
+- JSON IR 编解码；
+- 一个轻量独立的验收入口生成器（自包含 harness，无需外部测试框架）；
+- 一个仅报告、支持 CJK 相似度评分的 IR-DRY 检查器；
+- 一个将精确步骤文本分发到项目步骤处理器的运行时；
+- Gherkin 示例值变异，含 feature 戳记、scenario 清单、生成文件实现哈希、
+  runner-worker 集成和状态报告。
 
-Project-specific code remains outside this package. Hosts provide step
-handlers, runner adapters, command wrappers, and any application fixtures; see
-"Adopting In A New Project" below.
+项目专用代码保留在本包之外。宿主提供步骤处理器、runner 适配器、命令包装器
+以及任何应用 fixture；参见下文"接入新项目"。
 
-## Layout
+## 目录结构 (Layout)
 
 ```text
 lib/acceptance4lua/
@@ -30,10 +27,10 @@ lib/acceptance4lua/
   *.lua                parser, generator, runtime, source maps, hashes
 ```
 
-## Generated Specs
+## 生成入口 (Generated Specs)
 
-Generated entrypoints are standalone Lua scripts. They default to the portable
-framework modules and a neutral host step module name:
+生成的入口是独立的 Lua 脚本。它们默认使用可移植的框架模块和一个中立的宿主
+步骤模块名：
 
 ```lua
 require("acceptance4lua.harness")
@@ -42,103 +39,92 @@ require("steps")
 require("acceptance4lua.json")
 ```
 
-The generator accepts module-name overrides for hosts with different
-namespaces: pass `steps_module` (and optionally `runtime_module`,
-`json_module`, `harness_module`) via `generator.generate(ir, opts)` /
-`generator.generate_file(json, out, opts)`, or `--steps-module <name>` on the
-`acceptance-entrypoint-generator` CLI.
+生成器接受模块名覆盖，以适应不同命名空间的宿主：通过
+`generator.generate(ir, opts)` / `generator.generate_file(json, out, opts)`
+传入 `steps_module`（以及可选的 `runtime_module`、`json_module`、
+`harness_module`），或在 `acceptance-entrypoint-generator` CLI 上使用
+`--steps-module <name>`。
 
-Run a generated entrypoint with any Lua interpreter; `LUA_PATH` must cover the
-framework and host modules (the runner sets it for you, and honors the
-`ACCEPTANCE_LUA_BIN` / `ACCEPTANCE_LUA_PATH` overrides):
+使用任意 Lua 解释器运行生成的入口；`LUA_PATH` 必须覆盖框架和宿主模块
+（runner 会自动设置，并遵循 `ACCEPTANCE_LUA_BIN` / `ACCEPTANCE_LUA_PATH`
+覆盖）：
 
 ```sh
 LUA_PATH='lib/?.lua;lib/?/init.lua;;' lua path/to/generated_spec.lua
 ```
 
-## Adopting In A New Project (eggy)
+## 接入新项目 (Adopting In A New Project)
 
-A host project wires the pipeline like this (using a fictional project `eggy`
-as the example):
+宿主项目按如下方式接入流水线（以虚构项目 `eggy` 为例）：
 
-1. Lay out step handlers as a plain Lua module returning
-   `{ handlers = function() return { ["step text"] = function(world, example) ... end, ... } end }`.
-   The generated entrypoint requires `steps` by default, so `eggy/steps.lua`
-   works out of the box; for a nested namespace such as `eggy.steps`, pass
-   `steps_module = "eggy.steps"` to the generator (and to the mutator, which
-   regenerates entrypoints internally).
-2. Parse and generate:
-   `require("acceptance4lua.gherkin_parser").write_json_file("features/x.feature", "build/x.json")`
-   then
-   `require("acceptance4lua.generator").generate_file("build/x.json", "build/x_spec.lua", { steps_module = "eggy.steps" })`.
-3. Run specs through the runner (`acceptance4lua.runner.run_generated`) or
-   plain `lua`, with `LUA_PATH` covering both `acceptance4lua` and the host
-   step module.
-4. Mutate:
-   `require("acceptance4lua.mutator").run({ feature = "features/x.feature", steps_module = "eggy.steps", ... })`,
-   or the CLI `gherkin-mutator --feature <path> --runner-worker <cmd>
-   [--steps-module <name>]`. `--feature` is required; there is no built-in
-   default path.
-5. Feature files under `features/` must start with `# language: zh-CN`. Hosts
-   keeping features elsewhere can pass
-   `mandatory_language_dirs = { "<dir>" }` to
-   `chinese_normalizer.normalize_text` / `gherkin_parser.parse_file` (empty
-   table disables the rule).
+1. 将步骤处理器编写为普通 Lua 模块，返回
+   `{ handlers = function() return { ["step text"] = function(world, example) ... end, ... } end }`。
+   生成的入口默认 require `steps`，因此 `eggy/steps.lua` 可直接使用；对于
+   `eggy.steps` 等嵌套命名空间，向生成器（以及内部会重新生成入口的 mutator）
+   传入 `steps_module = "eggy.steps"`。
+2. 解析并生成：
+   `require("acceptance4lua.gherkin_parser").write_json_file("features/x.feature", "build/x.json")`，
+   然后
+   `require("acceptance4lua.generator").generate_file("build/x.json", "build/x_spec.lua", { steps_module = "eggy.steps" })`。
+3. 通过 runner（`acceptance4lua.runner.run_generated`）或普通 `lua` 运行
+   spec，`LUA_PATH` 需同时覆盖 `acceptance4lua` 和宿主步骤模块。
+4. 变异：
+   `require("acceptance4lua.mutator").run({ feature = "features/x.feature", steps_module = "eggy.steps", ... })`，
+   或 CLI `gherkin-mutator --feature <path> --runner-worker <cmd> [--steps-module <name>]`。
+   `--feature` 为必选项；没有内置默认路径。
+5. `features/` 下的 feature 文件必须以 `# language: zh-CN` 开头。如果宿主
+   将 feature 放在其他位置，可向 `chinese_normalizer.normalize_text` /
+   `gherkin_parser.parse_file` 传入 `mandatory_language_dirs = { "<dir>" }`
+   （传空表则禁用此规则）。
 
-### Compatibility Notes
+### 兼容说明 (Compatibility Notes)
 
-- The default generated step module changed from `acceptance.steps` to
-  `steps`. Hosts relying on the old implicit default must pass
-  `steps_module = "acceptance.steps"` explicitly.
-- `gherkin-mutator` no longer defaults `--feature` to a placeholder path;
-  the option is now required (any real caller already passed it).
+- 默认生成的步骤模块已从 `acceptance.steps` 变更为 `steps`。依赖旧隐式默认值
+  的宿主必须显式传入 `steps_module = "acceptance.steps"`。
+- `gherkin-mutator` 不再将 `--feature` 默认为占位路径；该选项现为必选（所有
+  实际调用方原本就已传入此选项）。
 
-## Upstream Alignment (对齐上游)
+## 上游对齐 (Upstream Alignment)
 
-`acceptance4lua` follows the "Lua faithful implementation of the upstream
-spec" doctrine: behavior that is identical across upstream implementations is
-copied verbatim; anything different is a deliberate deviation, recorded here
-with its reason. Cross-repo decisions live as ADRs in the luatools notes repo
-(`projects/luatools/docs/adr/`).
+`acceptance4lua` 遵循"上游规格的 Lua 忠实实现"原则：上游各实现中一致的行为
+逐字照抄；任何不同之处均为有意偏离，并在此记录其理由。跨仓库决策以 ADR
+形式存放在 luatools notes 仓库（`projects/luatools/docs/adr/`）。
 
-**Aligned invariants (对齐不变量)**
+**对齐不变量**
 
-- Command names and shapes (`gherkin-parser`, `acceptance-entrypoint-generator`,
-  `gherkin-ir-dry-checker`, `gherkin-mutator`) and the exit-code convention
-  (0 success / 1 runtime error / 2 usage error).
-- JSON IR structure and the runner-adapter protocol defined by APS.
-- IR-DRY checker is report-only; it never rewrites features, IR, or generated
-  files.
+- 命令名与形态（`gherkin-parser`、`acceptance-entrypoint-generator`、
+  `gherkin-ir-dry-checker`、`gherkin-mutator`）及退出码约定（0 成功 /
+  1 运行时错误 / 2 用法错误）。
+- JSON IR 结构及 APS 定义的 runner-adapter 协议。
+- IR-DRY 检查器仅报告；绝不重写 feature、IR 或生成的文件。
 
-**Deliberate deviations (有意偏离)**
+**有意偏离**
 
-- Chinese `# language: zh-CN` keyword normalization — APS explicitly does not
-  support localized keywords; required by the host project's Chinese features.
-- CJK-aware similarity scoring (function-word dropping + Han-bigram Jaccard)
-  — the portable alphanumeric baseline scores unrelated Chinese steps at 1.0;
-  APS permits better language-neutral heuristics.
-- Exact dictionary matching for step text (APS recommends regex/placeholder
-  matching) — determinism and clearer error messages for the host.
-- Bundled minimal busted-like harness — generated entrypoints must run on
-  hosts with no test framework installed.
-- Extra `--skip-columns` / `--verbose` options and the Lua subprocess fallback
-  when no `--runner-worker` is given.
-- Extra IR metadata (`source_path`, `source_line`, `field_names`) for error
-  localization and mutation reports.
+- 中文 `# language: zh-CN` 关键字规范化 —— APS 明确不支持本地化关键字；
+  宿主项目的中文 feature 需要此功能。
+- CJK 感知相似度评分（虚词丢弃 + 汉字二元组 Jaccard）—— 可移植的字母数字
+  基线会将不相关的中文步骤评分为 1.0；APS 允许更好的语言中立的启发式方法。
+- 步骤文本的精确字典匹配（APS 推荐 regex/占位符匹配）—— 为宿主提供确定性
+  和更清晰的错误消息。
+- 内嵌最小 busted 风格 harness —— 生成的入口必须在未安装测试框架的宿主上
+  运行。
+- 额外的 `--skip-columns` / `--verbose` 选项，以及未提供 `--runner-worker`
+  时的 Lua 子进程回退。
+- 额外的 IR 元数据（`source_path`、`source_line`、`field_names`），用于错误
+  定位和变异报告。
 
-## Tests
+## 测试 (Tests)
 
-The test suite runs on a self-contained minimal harness (`spec/harness.lua`)
-that provides the busted-style `describe`/`it`/`assert` API, so no external
-test dependency is needed:
+测试套件运行在自包含的最小 harness（`spec/harness.lua`）上，该 harness
+提供 busted 风格的 `describe`/`it`/`assert` API，因此无需外部测试依赖：
 
 ```sh
 lua spec/run.lua
 ```
 
-## Relationship To APS
+## 与 APS 的关系 (Relationship To APS)
 
-The command shapes remain APS-compatible:
+命令形态保持 APS 兼容：
 
 ```text
 gherkin-parser <feature-file> <json-output>
@@ -147,19 +133,15 @@ gherkin-ir-dry-checker [--include-exact] <json-ir> <report-output>
 gherkin-mutator [options]
 ```
 
-The IR-DRY checker is report-only: it reads one JSON IR file and writes an
-advisory JSON report. It never rewrites feature files, IR, generated
-entrypoints, or project implementation files.
+IR-DRY 检查器仅报告：它读取一个 JSON IR 文件并写入一份咨询性 JSON 报告。
+它绝不重写 feature 文件、IR、生成的入口文件或项目实现文件。
 
-Its exact-match categories (`duplicate-in-scenario`, `exact-duplicate`,
-`placeholder-variant`) keep the portable APS semantics. Similarity scoring
-deviates from the portable alphanumeric baseline, which APS permits
-("implementations may add better language-neutral heuristics"): Chinese step
-text yields no alphanumeric tokens once placeholders are removed, so the
-baseline scores unrelated Chinese steps at 1.0. This implementation drops
-function words and then scores Jaccard similarity over Han bigrams, so findings
-on CJK step text are meaningful.
+其精确匹配类别（`duplicate-in-scenario`、`exact-duplicate`、
+`placeholder-variant`）保持了可移植的 APS 语义。相似度评分偏离了可移植的
+字母数字基线，这是 APS 所允许的（"各实现可添加更好的语言中立的启发式方法"）：
+中文步骤文本在移除占位符后不产生字母数字 token，因此基线会将不相关的中文
+步骤评分为 1.0。本实现丢弃虚词后对汉字二元组计算 Jaccard 相似度，使得对
+CJK 步骤文本的发现具有实际意义。
 
-`acceptance4lua` intentionally supports only the deterministic subset needed by
-the host project. Unsupported Gherkin syntax should fail clearly instead of
-being silently ignored.
+`acceptance4lua` 有意仅支持宿主项目所需的确定性子集。不支持的 Gherkin 语法
+应明确失败，而非被静默忽略。
