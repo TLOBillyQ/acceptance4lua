@@ -59,6 +59,44 @@ function TestAcceptance4lua:test_parses_supported_aps_gherkin_subset()
   lu.assertEquals(ir.scenarios[1].examples[1], { raw = "12", result = "12" })
 end
 
+function TestAcceptance4lua:test_second_examples_block_merges_like_upstream()
+  -- 上游（Go parser.go / bb gherkin.clj）语义：同场景第二个 Examples 静默合并——
+  -- 已解析的行保留，新块行追加到同一列表（issue#1 决策：沿用上游）。
+  local ir = assert(parser.parse_text(table.concat({
+    "Feature: merge",
+    "Scenario Outline: s",
+    "  Given x <a>",
+    "Examples:",
+    "  | a |",
+    "  | 1 |",
+    "Examples:",
+    "  | a |",
+    "  | 2 |",
+    "  | 3 |",
+  }, "\n")))
+
+  lu.assertEquals(#ir.scenarios[1].examples, 3)
+  lu.assertEquals(ir.scenarios[1].examples[1], { a = "1" })
+  lu.assertEquals(ir.scenarios[1].examples[3], { a = "3" })
+end
+
+function TestAcceptance4lua:test_step_after_examples_appends_like_upstream()
+  -- 上游语义：Examples 后的 step 行静默追加到场景步骤（issue#1 决策：沿用上游）。
+  local ir = assert(parser.parse_text(table.concat({
+    "Feature: trailing step",
+    "Scenario Outline: s",
+    "  Given x <a>",
+    "Examples:",
+    "  | a |",
+    "  | 1 |",
+    "  Then y",
+  }, "\n")))
+
+  lu.assertEquals(#ir.scenarios[1].steps, 2)
+  lu.assertEquals(ir.scenarios[1].steps[2].text, "y")
+  lu.assertEquals(#ir.scenarios[1].examples, 1)
+end
+
 function TestAcceptance4lua:test_normalizes_supported_chinese_keyword_set()
   local normalized = assert(normalizer.normalize_text(table.concat({
     "# language: zh-CN",
@@ -160,6 +198,20 @@ function TestAcceptance4lua:test_host_can_override_step_module_name()
   lu.assertNil(generated:find('require("steps")', 1, true))
 end
 
+function TestAcceptance4lua:test_metadata_name_disambiguates_colliding_slugs()
+  -- a_b.feature 与 a/b.feature 映射到同一 slug，路径短哈希使 metadata 文件名
+  -- 不再互相覆盖（issue#2）；同一输入保持确定性。
+  local first = generator.metadata_path_for("build/out_spec.lua", "a_b.feature")
+  local second = generator.metadata_path_for("build/out_spec.lua", "a/b.feature")
+
+  lu.assertNotEquals(second, first)
+  lu.assertEquals(generator.metadata_path_for("build/out_spec.lua", "a_b.feature"), first)
+  lu.assertNotNil(first:find("^build/metadata/a%-b%-feature%-%x%x%x%x%x%x%x%x%.json$"))
+
+  -- 路径分隔符归一化：Windows 风格反斜杠与正斜杠得到同一名称。
+  lu.assertEquals(generator.metadata_path_for("build/out_spec.lua", "a\\b.feature"), second)
+end
+
 function TestAcceptance4lua:test_runs_generated_entrypoint_end_to_end()
   local ir = assert(parser.parse_text(_feature()))
   local tmp_root = common.make_temp_path("acceptance4lua_runner_e2e_", "")
@@ -196,6 +248,9 @@ function TestAcceptance4lua:test_runs_generated_entrypoint_end_to_end()
     local passing = runner.run_generated(generated_path, { lua_path = lua_path })
     lu.assertEquals(passing.error, "")
     lu.assertTrue(passing.passed, passing.output)
+    -- duration 为 wall clock（os.time 秒级，issue#3），非负数即可，不断言具体值。
+    lu.assertTrue(passing.duration >= 0)
+    lu.assertEquals(passing.duration % 1, 0)
 
     _write_steps([[
       ["handlers are loaded"] = function(world) world.loaded = true end,
@@ -306,6 +361,25 @@ function TestAcceptance4lua:test_parses_skip_columns_into_exact_match_set()
     "--runner-worker", "true",
   }))
   lu.assertNil(without.skip_columns)
+end
+
+function TestAcceptance4lua:test_workers_numeric_boundaries_follow_upstream_clamp()
+  -- 数值边界沿用上游 APS clamp 语义（issue#4 决策）：CLI 层不拒绝非正数，
+  -- 由 mutator.run 的 math.max(1, ...) 兜底；非数值仍在 CLI 层报错。
+  local parsed = assert(cli_mutator.parse_args({
+    "--feature", "features/x.feature",
+    "--runner-worker", "true",
+    "--workers", "0",
+  }))
+  lu.assertEquals(parsed.workers, 0)
+
+  local invalid, err = cli_mutator.parse_args({
+    "--feature", "features/x.feature",
+    "--runner-worker", "true",
+    "--workers", "abc",
+  })
+  lu.assertNil(invalid)
+  lu.assertNotNil(tostring(err):find("invalid workers", 1, true))
 end
 
 function TestAcceptance4lua:test_requires_feature_flag()

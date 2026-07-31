@@ -83,6 +83,17 @@ LUA_PATH='lib/?.lua;lib/?/init.lua;;' lua path/to/generated_spec.lua
   的宿主必须显式传入 `steps_module = "acceptance.steps"`。
 - `gherkin-mutator` 不再将 `--feature` 默认为占位路径；该选项现为必选（所有
   实际调用方原本就已传入此选项）。
+- 生成的 metadata 文件名现在附带规范化 feature 路径的短哈希
+  （`<slug>-<8hex>.json`），折叠到同一 slug 的不同路径（如 `a_b.feature`
+  与 `a/b.feature`）不再互相覆盖。外部消费方应通过
+  `generator.metadata_path_for` 解析 metadata 路径，而非自行拼接文件名。
+- mutation 报告中的 `duration` 已改为 wall clock（`os.time` 秒级，与上游
+  `time.Since` / `System/nanoTime` 同为墙钟口径；此前误用 `os.clock`
+  进程 CPU 时间，数值近似为 0），报告数值会因此变化。
+- 数值选项边界沿用上游 APS 语义：`--workers` 小于 1 的值被钳制为 1 而非
+  拒绝；`--timeout 0` 表示立即超时；`--status-interval 0` 关闭状态行。
+- 同一场景的第二个 `Examples:` 块与 `Examples:` 之后的 step 行按上游 APS
+  行为处理（示例行合并进场景、step 追加），而非报错。
 
 ## 上游对齐 (Upstream Alignment)
 
@@ -97,6 +108,9 @@ LUA_PATH='lib/?.lua;lib/?/init.lua;;' lua path/to/generated_spec.lua
   1 运行时错误 / 2 用法错误）。
 - JSON IR 结构及 APS 定义的 runner-adapter 协议。
 - IR-DRY 检查器仅报告；绝不重写 feature、IR 或生成的文件。
+- 上游两套实现（Go 与 Babashka）一致的边界与静默语义逐字对齐：同场景第二个
+  `Examples:` 块静默合并、`Examples:` 后的 step 行静默追加、`--workers`
+  非正值钳制为 1、子进程耗时按 wall clock 计时。
 
 **有意偏离**
 
@@ -112,6 +126,9 @@ LUA_PATH='lib/?.lua;lib/?/init.lua;;' lua path/to/generated_spec.lua
   时的 Lua 子进程回退。
 - 额外的 IR 元数据（`source_path`、`source_line`、`field_names`），用于错误
   定位和变异报告。
+- 生成的 metadata 文件名附加规范化路径的短哈希 —— 上游 slug 算法存在路径
+  冲突缺陷（`a_b.feature` 与 `a/b.feature` 生成同名文件互相覆盖），本实现
+  予以消除。
 
 ## 测试 (Tests)
 
