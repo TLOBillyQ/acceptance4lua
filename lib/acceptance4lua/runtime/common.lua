@@ -164,8 +164,14 @@ function common.make_temp_path(prefix, suffix)
   return common.join_path(tmp_root, tostring(prefix or "tmp") .. "_" .. token .. tostring(suffix or ""))
 end
 
-function common.shell_quote(value)
-  local text = tostring(value or "")
+-- 统一计时口径：os.clock 是本进程 CPU 时间，不含子进程 wall time；
+-- 纯 stdlib 可用的 wall clock 只有秒级 os.time，与 parallel_lanes/status 的口径一致。
+-- 配合 os.difftime(common.wall_time(), start) 使用。
+function common.wall_time()
+  return os.time()
+end
+
+function common.shell_quote(value)  local text = tostring(value or "")
   if _is_windows() then
     return '"' .. text:gsub('"', '\\"') .. '"'
   end

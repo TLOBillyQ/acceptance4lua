@@ -41,7 +41,7 @@ function runner.build_command(path, opts)
 end
 
 function runner.run_generated(path, opts)
-  local start_time = os.clock()
+  local start_time = common.wall_time()
   local command = runner.build_command(path, opts)
   local result = common.run_command(command, opts and opts.cwd and { cwd = opts.cwd } or nil)
 
@@ -61,7 +61,7 @@ function runner.run_generated(path, opts)
     passed = result.ok == true,
     output = output,
     error = infrastructure_error,
-    duration = os.clock() - start_time,
+    duration = os.difftime(common.wall_time(), start_time),
   }
 end
 

@@ -136,10 +136,10 @@ local function _prepare_one(base_ir, mutation, options)
 end
 
 local function _run_one(base_ir, mutation, options)
-  local start_time = os.clock()
+  local start_time = common.wall_time()
   local feature_json, err = _prepare_one(base_ir, mutation, options)
   if feature_json == nil then
-    return _result_for_error(mutation, err, os.clock() - start_time)
+    return _result_for_error(mutation, err, os.difftime(common.wall_time(), start_time))
   end
 
   local run = runner.run_generated(options.generated_path, {
@@ -171,7 +171,7 @@ end
 
 local function _result_from_lane(prepared, lane_result)
   local output = lane_result.output or ""
-  local duration = os.clock() - prepared.started_at
+  local duration = os.difftime(common.wall_time(), prepared.started_at)
   if runner.is_infrastructure_error(lane_result.exit_code, output) then
     return _result_for_error(
       prepared.mutation,
@@ -202,7 +202,7 @@ local function _run_parallel_batch(prepared_batch, options)
   local results = {}
   if not run_ok then
     for index, prepared in ipairs(prepared_batch) do
-      results[index] = _result_for_error(prepared.mutation, run_err, os.clock() - prepared.started_at)
+      results[index] = _result_for_error(prepared.mutation, run_err, os.difftime(common.wall_time(), prepared.started_at))
     end
     return results
   end
@@ -257,7 +257,7 @@ local function _run_parallel(base_ir, mutations, options, timed_out)
           mutation = mutation,
           generated_path = options.generated_path,
           feature_json = feature_json,
-          started_at = os.clock(),
+          started_at = common.wall_time(),
         }
         if #batch >= options.workers then
           flush()
@@ -487,6 +487,8 @@ function mutator.run(options)
   end
   options.work_dir = options.work_dir or "build/acceptance-mutation"
   options.generated_dir = options.generated_dir or common.join_path(options.work_dir, "generated")
+  -- workers 边界采用 APS 上游（Go mutator.go / bb mutation.clj）的 clamp 语义：
+  -- 非正数静默提升到 1，CLI 帮助文本已写明，不做硬性报错。
   options.workers = math.max(1, tonumber(options.workers or 1) or 1)
   options.level = options.level or "hard"
   if not _VALID_LEVELS[options.level] then
