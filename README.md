@@ -93,6 +93,39 @@ as the example):
 - `gherkin-mutator` no longer defaults `--feature` to a placeholder path;
   the option is now required (any real caller already passed it).
 
+## Upstream Alignment (对齐上游)
+
+`acceptance4lua` follows the "Lua faithful implementation of the upstream
+spec" doctrine: behavior that is identical across upstream implementations is
+copied verbatim; anything different is a deliberate deviation, recorded here
+with its reason. Cross-repo decisions live as ADRs in the luatools notes repo
+(`projects/luatools/docs/adr/`).
+
+**Aligned invariants (对齐不变量)**
+
+- Command names and shapes (`gherkin-parser`, `acceptance-entrypoint-generator`,
+  `gherkin-ir-dry-checker`, `gherkin-mutator`) and the exit-code convention
+  (0 success / 1 runtime error / 2 usage error).
+- JSON IR structure and the runner-adapter protocol defined by APS.
+- IR-DRY checker is report-only; it never rewrites features, IR, or generated
+  files.
+
+**Deliberate deviations (有意偏离)**
+
+- Chinese `# language: zh-CN` keyword normalization — APS explicitly does not
+  support localized keywords; required by the host project's Chinese features.
+- CJK-aware similarity scoring (function-word dropping + Han-bigram Jaccard)
+  — the portable alphanumeric baseline scores unrelated Chinese steps at 1.0;
+  APS permits better language-neutral heuristics.
+- Exact dictionary matching for step text (APS recommends regex/placeholder
+  matching) — determinism and clearer error messages for the host.
+- Bundled minimal busted-like harness — generated entrypoints must run on
+  hosts with no test framework installed.
+- Extra `--skip-columns` / `--verbose` options and the Lua subprocess fallback
+  when no `--runner-worker` is given.
+- Extra IR metadata (`source_path`, `source_line`, `field_names`) for error
+  localization and mutation reports.
+
 ## Tests
 
 The test suite runs on a self-contained minimal harness (`spec/harness.lua`)
