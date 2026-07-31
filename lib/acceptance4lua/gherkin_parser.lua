@@ -130,7 +130,8 @@ function gherkin_parser.parse_text(text, opts)
       if current_scenario == nil then
         return _error(line_number, "examples section outside scenario", opts)
       end
-      current_scenario.examples = {}
+      -- 同场景第二个 Examples 与上游（Go parser.go / bb gherkin.clj）保持一致：
+      -- 静默合并——保留已解析的示例行，仅重置表头，后续行追加到同一列表。
       section = "examples"
       example_headers = nil
       example_header_line_number = nil
@@ -175,6 +176,7 @@ function gherkin_parser.parse_text(text, opts)
     if section == "background" then
       feature.background[#feature.background + 1] = _step(keyword, step_text, line_number, source_map)
     elseif current_scenario ~= nil then
+      -- Examples 后的 step 行静默追加到场景并切回 scenario 小节，与上游行为一致。
       current_scenario.steps[#current_scenario.steps + 1] = _step(keyword, step_text, line_number, source_map)
       section = "scenario"
     else
