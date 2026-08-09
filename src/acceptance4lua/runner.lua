@@ -12,7 +12,7 @@ function runner.is_infrastructure_error(exit_code, output)
 end
 
 -- 生成的入口是独立 lua 脚本（自带 harness，结尾 os.exit）。
--- 通过 LUA_PATH 指到宿主的 lib/ 布局，替代旧 busted --helper 机制；
+-- 通过 LUA_PATH 指到宿主的 src/ 布局，替代旧 busted --helper 机制；
 -- 宿主可用 ACCEPTANCE_LUA_BIN / ACCEPTANCE_LUA_PATH 或 opts 覆盖。
 local function _lua_bin(opts)
   return (opts and opts.lua_bin) or os.getenv("ACCEPTANCE_LUA_BIN") or "lua"
@@ -21,7 +21,7 @@ end
 local function _lua_path(opts)
   return (opts and opts.lua_path)
     or os.getenv("ACCEPTANCE_LUA_PATH")
-    or "lib/?.lua;lib/?/init.lua;;"
+    or "src/?.lua;src/?/init.lua;;"
 end
 
 function runner.build_command(path, opts)

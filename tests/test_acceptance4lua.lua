@@ -234,7 +234,7 @@ function TestAcceptance4lua:test_runs_generated_entrypoint_end_to_end()
     }, "\n")))
   end
 
-  local lua_path = "lib/?.lua;lib/?/init.lua;" .. tmp_root .. "/?.lua;;"
+  local lua_path = "src/?.lua;src/?/init.lua;" .. tmp_root .. "/?.lua;;"
   local ok, err = xpcall(function()
     _write_steps([[
       ["handlers are loaded"] = function(world) world.loaded = true end,
