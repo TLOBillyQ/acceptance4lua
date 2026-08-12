@@ -2,7 +2,7 @@ rockspec_format = "3.0"
 package = "acceptance4lua"
 version = "0.1.1-1"
 source = {
-   url = "git+http://lzxsvn:3000/qinyuanj/acceptance4lua.git",
+   url = "git+http://lzxsvn:3000/eggy/acceptance4lua.git",
    tag = "v0.1.1",
 }
 description = {
@@ -13,7 +13,7 @@ description = {
       Chinese keyword normalization, JSON IR encoding/decoding, acceptance
       entry point generation, IR-DRY checking, and Gherkin mutation.
    ]],
-   homepage = "http://lzxsvn:3000/qinyuanj/acceptance4lua",
+   homepage = "http://lzxsvn:3000/eggy/acceptance4lua",
    license = "MIT",
 }
 dependencies = {
